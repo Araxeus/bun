@@ -31,6 +31,16 @@ cmake_path(APPEND GLOBAL_ZIG_CACHE_DIR "global")
 # Used in process.version, process.versions.node, napi, and elsewhere
 set(REPORTED_NODEJS_VERSION "22.3.0")
 
+# Is this a non-release build? (e.g. from a PR or commit)
+if(NOT BUILD)
+    set(BUILD "false")
+endif()
+
+# Used in --revision to show the build number, if a pull request
+if(NOT BUILD_NUMBER)
+    set(BUILD_NUMBER "0")
+endif()
+
 # WebKit uses -std=gnu++20 on non-macOS non-Windows
 # If we do not set this, it will crash at startup on the first memory allocation.
 if(NOT WIN32 AND NOT APPLE)
@@ -951,6 +961,8 @@ if(NOT BUN_LINK_ONLY AND NOT BUN_CPP_ONLY)
         "-Dtarget=${ZIG_TARGET}"
         "-Denable_logs=${ENABLE_LOGS}"
         "-Dreported_nodejs_version=${REPORTED_NODEJS_VERSION}"
+        "-Dbuild_number=${BUILD_NUMBER}"
+        "-Dbuild=${BUILD}"
         "-Dobj_format=${BUN_ZIG_OBJ_FORMAT}"
         "--cache-dir" "${LOCAL_ZIG_CACHE_DIR}"
         "--global-cache-dir" "${GLOBAL_ZIG_CACHE_DIR}"
