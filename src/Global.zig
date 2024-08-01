@@ -20,6 +20,8 @@ else
 /// like "1.0.0-canary.12"
 pub const package_json_version_with_canary = if (Environment.isDebug)
     version_string ++ "-debug"
+else if (Environment.is_build)
+    std.fmt.comptimePrint("{s}-build.{d}", .{ version_string, Environment.build_number })
 else if (Environment.is_canary)
     std.fmt.comptimePrint("{s}-canary.{d}", .{ version_string, Environment.canary_revision })
 else
@@ -30,6 +32,8 @@ pub const package_json_version_with_sha = if (Environment.git_sha.len == 0)
     package_json_version
 else if (Environment.isDebug)
     std.fmt.comptimePrint("{s} ({s})", .{ version_string, Environment.git_sha[0..@min(Environment.git_sha.len, 8)] })
+else if (Environment.is_build)
+    std.fmt.comptimePrint("{s}-build.{d} ({s})", .{ version_string, Environment.build_number, Environment.git_sha[0..@min(Environment.git_sha.len, 8)] })
 else if (Environment.is_canary)
     std.fmt.comptimePrint("{s}-canary.{d} ({s})", .{ version_string, Environment.canary_revision, Environment.git_sha[0..@min(Environment.git_sha.len, 8)] })
 else
@@ -41,6 +45,8 @@ pub const package_json_version_with_revision = if (Environment.git_sha.len == 0)
     package_json_version
 else if (Environment.isDebug)
     std.fmt.comptimePrint(version_string ++ "-debug+{s}", .{Environment.git_sha_short})
+else if (Environment.is_build)
+    std.fmt.comptimePrint(version_string ++ "-build.{d}+{s}", .{ Environment.build_number, Environment.git_sha_short })
 else if (Environment.is_canary)
     std.fmt.comptimePrint(version_string ++ "-canary.{d}+{s}", .{ Environment.canary_revision, Environment.git_sha_short })
 else if (Environment.isTest)

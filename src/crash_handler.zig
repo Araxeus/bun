@@ -706,7 +706,7 @@ else
 const metadata_version_line = std.fmt.comptimePrint(
     "Bun {s}v{s} {s} {s}{s}\n",
     .{
-        if (bun.Environment.isDebug) "Debug " else if (bun.Environment.is_canary) "Canary " else "",
+        if (bun.Environment.isDebug) "Debug " else if (bun.Environment.is_build) "Build " else if (bun.Environment.is_canary) "Canary " else "",
         Global.package_json_version_with_sha,
         bun.Environment.os.displayString(),
         arch_display_string,
@@ -1647,7 +1647,7 @@ pub const js_bindings = struct {
     }
 
     pub fn jsGetFeatureData(global: *JSC.JSGlobalObject, _: *JSC.CallFrame) JSC.JSValue {
-        const obj = JSValue.createEmptyObject(global, 5);
+        const obj = JSValue.createEmptyObject(global, 7);
         const list = bun.Analytics.packed_features_list;
         const array = JSValue.createEmptyArray(global, list.len);
         for (list, 0..) |feature, i| {
@@ -1656,6 +1656,8 @@ pub const js_bindings = struct {
         obj.put(global, JSC.ZigString.static("features"), array);
         obj.put(global, JSC.ZigString.static("version"), bun.String.init(Global.package_json_version).toJS(global));
         obj.put(global, JSC.ZigString.static("is_canary"), JSC.JSValue.jsBoolean(bun.Environment.is_canary));
+        obj.put(global, JSC.ZigString.static("is_build"), JSC.JSValue.jsBoolean(bun.Environment.is_build));
+        obj.put(global, JSC.ZigString.static("build_number"), JSValue.jsNumberFromInt64(bun.Environment.build_number));
         obj.put(global, JSC.ZigString.static("revision"), bun.String.init(bun.Environment.git_sha).toJS(global));
         obj.put(global, JSC.ZigString.static("generated_at"), JSValue.jsNumberFromInt64(@max(std.time.milliTimestamp(), 0)));
         return obj;

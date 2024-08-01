@@ -43,6 +43,8 @@ const BunBuildOptions = struct {
 
     version: Version,
     canary_revision: ?u32,
+    is_build: bool,
+    build_number: u32,
     sha: []const u8,
     enable_logs: bool = false,
     tracy_callstack_depth: u16,
@@ -68,6 +70,8 @@ const BunBuildOptions = struct {
         opts.addOption([]const u8, "base_path", b.pathFromRoot("."));
         opts.addOption(u32, "canary_revision", this.canary_revision orelse 0);
         opts.addOption(bool, "is_canary", this.canary_revision != null);
+        opts.addOption(bool, "is_build", this.is_build);
+        opts.addOption(u32, "build_number", this.build_number);
         opts.addOption(Version, "version", this.version);
         opts.addOption([:0]const u8, "sha", b.allocator.dupeZ(u8, this.sha) catch @panic("OOM"));
         opts.addOption(bool, "baseline", this.isBaseline());
@@ -200,6 +204,9 @@ pub fn build(b: *Build) !void {
             break :canary if (rev == 0) null else rev;
         },
 
+        .is_build = b.option(bool, "build", "Is this a non-release build? (e.g. from a PR or commit)") orelse false,
+        .build_number = b.option(u32, "build_number", "The build number") orelse 0,
+
         .reported_nodejs_version = try Version.parse(
             b.option([]const u8, "reported_nodejs_version", "Reported Node.js version") orelse
                 "0.0.0-unset",
@@ -319,6 +326,8 @@ pub inline fn addMultiCheck(
                 .optimize = mode,
 
                 .canary_revision = root_build_options.canary_revision,
+                .is_build = root_build_options.is_build,
+                .build_number = root_build_options.build_number,
                 .sha = root_build_options.sha,
                 .tracy_callstack_depth = root_build_options.tracy_callstack_depth,
                 .version = root_build_options.version,
