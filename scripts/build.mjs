@@ -33,6 +33,7 @@ import {
   runTask,
   print,
   compareSemver,
+  uploadArtifact,
 } from "./util.mjs";
 
 /**
@@ -335,44 +336,25 @@ export async function build(name, options = {}) {
 
 /**
  * @param {BuildOptions} options
- * @param {"cpp" | "zig" | "link" | undefined} target
+ * @param {"deps" | "cpp" | "zig" | "link" | undefined} target
  */
 export async function buildBun(options, target) {
-  const { build, os, debug, baseline, lto, valgrind, assertions, canary, isBuild, buildNumber, clean, jobs, verbose } =
-    options;
+  const { cwd, buildPath: basePath } = options;
+  
+  const depsPath = resolve(basePath, "bun-deps");
+  const zigPath = resolve(basePath, "bun-zig", "bun-zig.o");
+  const cppPath = resolve(basePath, "bun-cpp", "bun-cpp-objects.a");
 
-  const bunDepsPath = resolve(build, "bun-deps");
-  const bunZigPath = resolve(build, "bun-zig");
-  const bunCppPath = resolve(build, "bun-cpp", "bun-cpp-objects.a");
-  const buildPath = resolve(build, target ? `bun-${target}` : "bun-build");
-  const buildOptions = { ...options, artifact: "bun", build: buildPath };
+  const buildPath = resolve(basePath, target ? `bun-${target}` : "bun-build");
+  const buildOptions = {
+    ...options,
+    artifact: "bun",
+    build: buildPath,
+  };
 
-  if (clean) {
-    removeFile(buildPath);
-    mkdir(buildPath);
-  }
-
-  const flags = ["-DNO_CONFIGURE_DEPENDS=ON", `-DBUN_DEPS_OUT_DIR=${bunDepsPath}`];
-  if (buildNumber) {
-    flags.push(`-DBUILD_NUMBER=${buildNumber}`);
-  }
-  if (isBuild) {
-    flags.push(`-DBUILD=true`);
-  }
-  if (canary) {
-    flags.push(`-DCANARY=${canary}`);
-  }
-  if (baseline) {
-    flags.push("-DUSE_BASELINE_BUILD=ON");
-  }
-  if (lto) {
-    flags.push("-DUSE_LTO=ON");
-  }
-  if (assertions) {
-    flags.push("-DUSE_DEBUG_JSC=ON");
-  }
-  if (valgrind) {
-    flags.push("-DUSE_VALGRIND=ON");
+  const cleanPath = target ? basePath : buildPath;
+  if (clean || !isDirectory(cleanPath)) {
+    removeFile(cleanPath);
   }
 
   if (target === "cpp") {
@@ -424,14 +406,47 @@ export async function buildBun(options, target) {
 }
 
 /**
+ * Gets the extra cmake flags for building bun.
+ * @param {BuildOptions} options 
+ */
+function getBunCmakeFlags(options) {
+  const { baseline, lto, valgrind, assertions, canary, isBuild, buildNumber } = options;
+  const flags = ["-DNO_CONFIGURE_DEPENDS=ON"];
+
+  if (buildNumber) {
+    flags.push(`-DBUILD_NUMBER=${buildNumber}`);
+  }
+  if (isBuild) {
+    flags.push(`-DBUILD=true`);
+  }
+  if (canary) {
+    flags.push(`-DCANARY=${canary}`);
+  }
+  if (baseline) {
+    flags.push("-DUSE_BASELINE_BUILD=ON");
+  }
+  if (lto) {
+    flags.push("-DUSE_LTO=ON");
+  }
+  if (assertions) {
+    flags.push("-DUSE_DEBUG_JSC=ON");
+  }
+  if (valgrind) {
+    flags.push("-DUSE_VALGRIND=ON");
+  }
+
+  return flags;
+}
+
+/**
  * @param {BuildOptions} options
  */
-export async function buildBunOldJs(options) {
+async function buildBunRuntimeJs(options) {
   const { cwd, clean } = options;
+  const srcPath = join(cwd, "src", "runtime.bun.js");
+  const outPath = join(cwd, "src", "runtime.out.js");
 
-  const runtimeJsPath = join(cwd, "src", "runtime.bun.js");
-  const runtimeJsOutPath = join(cwd, "src", "runtime.out.js");
-  if (clean || !isFile(runtimeJsOutPath)) {
+  if (clean || !isFile(outPath)) {
     await spawn(
       "bunx",
       [
@@ -442,16 +457,23 @@ export async function buildBunOldJs(options) {
         "--format=esm",
         "--platform=node",
         "--external:/bun:*",
-        `--outfile=${runtimeJsOutPath}`,
-        runtimeJsPath,
+        `--outfile=${outPath}`,
+        srcPath,
       ],
       { cwd },
     );
   }
+}
 
-  const fallbackDecoderPath = join(cwd, "src", "fallback.ts");
-  const fallbackDecoderOutPath = join(cwd, "src", "fallback.out.js");
-  if (clean || !isFile(fallbackDecoderOutPath)) {
+/**
+ * @param {BuildOptions} options
+ */
+async function buildBunFallbackDecoder(options) {
+  const { cwd, clean } = options;
+  const srcPath = join(cwd, "src", "fallback.ts");
+  const outPath = join(cwd, "src", "fallback.out.js");
+
+  if (clean || !isFile(outPath)) {
     await spawn("bun", ["install"], { cwd });
     await spawn(
       "bunx",
@@ -462,19 +484,24 @@ export async function buildBunOldJs(options) {
         "--target=esnext",
         "--format=iife",
         "--platform=browser",
-        `--outfile=${fallbackDecoderOutPath}`,
-        fallbackDecoderPath,
+        `--outfile=${outPath}`,
+        srcPath,
       ],
       { cwd },
     );
   }
+}
 
-  const bunErrorPath = join(cwd, "packages", "bun-error");
-  const bunErrorIndexPath = join(bunErrorPath, "index.tsx");
-  const bunErrorCssPath = join(bunErrorPath, "bun-error.css");
-  const bunErrorOutPath = join(bunErrorPath, "dist");
-  if (clean || !isDirectory(bunErrorOutPath)) {
-    await spawn("bun", ["install"], { cwd: bunErrorPath });
+/**
+ * @param {BuildOptions} options
+ */
+async function buildBunError(options) {
+  const { cwd: pwd, clean } = options;
+  const cwd = join(pwd, "packages", "bun-error");
+  const outPath = join(cwd, "dist");
+  
+  if (clean || !isDirectory(outPath)) {
+    await spawn("bun", ["install"], { cwd });
     await spawn(
       "bunx",
       [
@@ -484,20 +511,26 @@ export async function buildBunOldJs(options) {
         "--format=esm",
         "--platform=browser",
         "--define:process.env.NODE_ENV=\"'production'\"",
-        `--outdir=${bunErrorOutPath}`,
-        bunErrorIndexPath,
-        bunErrorCssPath,
+        `--outdir=${outPath}`,
+        "index.tsx",
+        "bun-error.css",
       ],
       { cwd },
     );
   }
+}
 
-  const nodeFallbacksPath = join(cwd, "src", "node-fallbacks");
-  const nodeFallbacksOutPath = join(nodeFallbacksPath, "out");
-  if (clean || !isDirectory(nodeFallbacksOutPath)) {
-    const nodeFallbacksPaths = listFiles(nodeFallbacksPath);
-    const nodeFallbacksPathsJs = nodeFallbacksPaths.filter(filename => filename.endsWith(".js"));
-    await spawn("bun", ["install"], { cwd: nodeFallbacksPath });
+/**
+ * @param {BuildOptions} options
+ */
+async function buildBunNodeFallbacks(options) {
+  const { cwd: pwd, clean } = options;
+  const cwd = join(pwd, "src", "node-fallbacks");
+  const outPath = join(cwd, "out");
+  
+  if (clean || !isDirectory(outPath)) {
+    const filenames = listFiles(cwd).filter(filename => filename.endsWith(".js"));
+    await spawn("bun", ["install"], { cwd });
     await spawn(
       "bunx",
       [
@@ -506,30 +539,12 @@ export async function buildBunOldJs(options) {
         "--minify",
         "--format=esm",
         "--platform=browser",
-        `--outdir=${nodeFallbacksOutPath}`,
-        ...nodeFallbacksPathsJs,
+        `--outdir=${outPath}`,
+        ...filenames,
       ],
-      { cwd: nodeFallbacksPath },
+      { cwd },
     );
   }
-}
-
-/**
- * Saves the artifact at the given path to the build directory.
- * @param {BuildOptions} options
- * @param {string} path
- * @param {string} [name]
- */
-export async function saveArtifact(options, path, name) {
-  const { build } = options;
-  const filePath = exists(path) ? path : join(build, path);
-  if (!isFile(filePath)) {
-    throw new Error(`Artifact not found: ${filePath}`);
-  }
-  const fileName = name || basename(filePath);
-  const buildPath = dirname(build);
-  const targetPath = join(fileName.startsWith("bun") ? buildPath : join(buildPath, "bun-deps"), fileName);
-  copyFile(filePath, targetPath);
 }
 
 /**
@@ -555,6 +570,13 @@ const dependencies = {
  * @param {BuildOptions} options
  */
 export async function buildDependencies(options) {
+  const { clean, buildPath } = options;
+
+  if (clean) {
+    const depOutPath = join(buildPath, "bun-deps");
+    removeFile(depOutPath);
+  }
+
   for (const name of Object.keys(dependencies)) {
     await buildDependency(name, options);
   }
@@ -572,8 +594,10 @@ export async function buildDependency(name, options = {}) {
   }
 
   const { cwd, buildPath, clean } = options;
-  const depPath = join(cwd || process.cwd(), "src", "deps", name);
-  const depBuildPath = join(buildPath, name);
+  const pwd = cwd || process.cwd();
+  const depPath = join(pwd, "src", "deps", name);
+  const depBuildPath = join(pwd, buildPath, name);
+  const depOutPath = join(pwd, buildPath, "bun-deps");
   const depOptions = {
     ...options,
     artifact: name,
@@ -589,11 +613,34 @@ export async function buildDependency(name, options = {}) {
       removeFile(depBuildPath);
     }
     await gitCloneSubmodule(depPath, { cwd, force: clean, recursive: true });
-    const artifacts = await dependency(depOptions);
-    console.log(name, artifacts);
+    return dependency(depOptions);
   }
 
-  await runTask(`Building ${name}`, build);
+  const artifacts = await runTask(`Building ${name}`, build);
+
+  /**
+   * @param {string} artifact 
+   */
+  async function upload(artifact) {
+    let path;
+    if (isFile(artifact)) {
+      path = artifact;
+    } else {
+      path = join(depBuildPath, artifact);
+    }
+
+    if (!isFile(path)) {
+      throw new Error(`Artifact not found: ${path}`);
+    }
+
+    if (isCI) {
+      uploadArtifact(path);
+    } else {
+      copyFile(path, join(depOutPath, basename(path)));
+    }
+  }
+
+  await runTask(`Saving ${name}`, () => Promise.all(artifacts.map(upload)));
 }
 
 /**
@@ -613,7 +660,7 @@ async function buildBoringSsl(options) {
   await cmakeGenerateBuild(options);
   await cmakeBuild(options, ...artifacts);
 
-  return artifacts.map(artifact => join(artifact));
+  return artifacts;
 }
 
 /**
@@ -693,7 +740,7 @@ async function buildLibdeflate(options) {
 
   let artifacts;
   if (os === "windows") {
-    artifacts = ["deflatestatic.lib"]; // TODO: deflate.lib
+    artifacts = ["deflatestatic.lib"];
   } else {
     artifacts = ["libdeflate.a"];
   }
@@ -706,7 +753,7 @@ async function buildLibdeflate(options) {
   );
   await cmakeBuild(options, ...artifacts);
 
-  return artifacts.map(artifact => join("libdeflate", artifact));
+  return artifacts;
 }
 
 /**
@@ -761,9 +808,9 @@ async function buildLshpack(options) {
 
   let artifacts;
   if (os === "windows") {
-    artifacts = ["ls-hpack.lib"]; // TODO: lshpack.lib
+    artifacts = ["ls-hpack.lib"];
   } else {
-    artifacts = ["libls-hpack.a"]; // TODO: liblshpack.a
+    artifacts = ["libls-hpack.a"];
   }
 
   await cmakeGenerateBuild(options, "-DLSHPACK_XXH=ON", "-DSHARED=0");
@@ -777,14 +824,14 @@ async function buildLshpack(options) {
  * @returns {Promise<string[]>}
  */
 async function buildMimalloc(options) {
-  const { os, debug, valgrind } = options;
+  const { os, debug, valgrind, buildPath } = options;
+  const name = debug ? "libmimalloc-debug" : "libmimalloc";
 
   let artifacts;
   if (os === "windows") {
-    artifacts = ["mimalloc-static.lib"]; // TODO: mimalloc.lib
+    artifacts = ["mimalloc-static.lib"];
   } else {
-    const name = debug ? "libmimalloc-debug" : "libmimalloc";
-    artifacts = [`${name}.a`, join("CMakeFiles", "mimalloc-obj.dir", "src", "static.c.o")]; // TODO: libmimalloc.o
+    artifacts = [`${name}.a`, `${name}.o`];
   }
 
   const flags = [
@@ -807,6 +854,11 @@ async function buildMimalloc(options) {
   }
   await cmakeGenerateBuild(options, ...flags);
   await cmakeBuild(options);
+
+  if (os !== "windows") {
+    const objectPath = join(buildPath, "CMakeFiles", "mimalloc-obj.dir", "src", "static.c.o");
+    copyFile(objectPath, join(buildPath, `${name}.o`));
+  }
 
   return artifacts;
 }
@@ -942,7 +994,7 @@ async function buildZstd(options) {
 
   let artifacts;
   if (os === "windows") {
-    artifacts = ["zstd_static.lib"]; // TODO: zstd.lib
+    artifacts = ["zstd_static.lib"];
   } else {
     artifacts = ["libzstd.a"];
   }
@@ -1070,7 +1122,7 @@ export function getLdFlags(options) {
  * @returns {string[]}
  */
 export function getCmakeFlags(options) {
-  const { cwd, build, debug, os, cc, cxx, ar, ranlib, ld, ccache, osxVersion } = options;
+  const { cwd, buildPath, debug, os, cc, cxx, ar, ranlib, ld, ccache, osxVersion } = options;
 
   const cflags = getCFlags(options);
   const cxxflags = getCxxFlags(options);
@@ -1078,7 +1130,7 @@ export function getCmakeFlags(options) {
 
   const flags = [
     cwd && `-S ${cwd}`,
-    build && `-B ${build}`,
+    buildPath && `-B ${buildPath}`,
     "-GNinja",
     cc && `-DCMAKE_C_COMPILER=${cc}`,
     `-DCMAKE_C_FLAGS=${cflags.join(" ")}`,
@@ -1139,9 +1191,9 @@ export async function cmakeGenerateBuild(options, ...extraArgs) {
  * @param {string[]} [targets]
  */
 export async function cmakeBuild(options, ...targets) {
-  const { debug, build, clean, jobs } = options;
+  const { cwd, buildPath, debug, clean, jobs } = options;
 
-  const args = ["--build", build || ".", "--parallel", `${jobs}`];
+  const args = ["--build", buildPath || ".", "--parallel", `${jobs}`];
   if (debug) {
     args.push("--config", "Debug");
   } else {
@@ -1154,7 +1206,7 @@ export async function cmakeBuild(options, ...targets) {
     args.push("--target", target);
   }
 
-  await spawn("cmake", args);
+  await spawn("cmake", args, { cwd });
 }
 
 /**

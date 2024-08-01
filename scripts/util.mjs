@@ -16,24 +16,6 @@ export const isGithubAction = process.env["GITHUB_ACTIONS"] === "true";
 export const isCI = isBuildKite || isGithubAction || process.env["CI"] === "true";
 
 /**
- * Saves the artifact at the given path to the build directory.
- * @param {BuildOptions} options
- * @param {string} path
- * @param {string} [name]
- */
-export async function saveArtifact(options, path, name) {
-  const { build } = options;
-  const filePath = existsSync(path) ? path : join(build, path);
-  if (!isFile(filePath)) {
-    throw new Error(`Artifact not found: ${filePath}`);
-  }
-  const fileName = name || basename(filePath);
-  const buildPath = dirname(build);
-  const targetPath = join(fileName.startsWith("bun") ? buildPath : join(buildPath, "bun-deps"), fileName);
-  cp(filePath, targetPath);
-}
-
-/**
  * Machine properties.
  */
 
@@ -814,6 +796,15 @@ export function listFiles(path, options = {}) {
 }
 
 /**
+ * Creates a symlink to a file.
+ * @param {string} source 
+ * @param {string} target 
+ */
+export function symlinkFile(source, target) {
+  fs.symlinkSync(source, target);
+}
+
+/**
  * Zips a directory into a zip file.
  * @param {string} path
  * @param {string} zipPath
@@ -920,6 +911,7 @@ export function exists(path) {
  * @property {string} [encoding]
  * @property {number} [timeout]
  * @property {boolean} [silent]
+ * @property {string} [input]
  * @property {boolean} [throwOnError]
  */
 
@@ -1538,6 +1530,79 @@ export async function runTask(label, fn) {
 
     if (isGithubAction) {
       print("::endgroup::");
+    }
+  }
+}
+
+/**
+ * Gets whether an error is busy and needs a backoff.
+ * @param {unknown} error 
+ * @returns {boolean}
+ */
+export function isBusy(error) {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  const { code } = error;
+  return code === "EBUSY" || code === "ETIMEDOUT" || code === "UNKNOWN";
+}
+
+/**
+ * @param {*} retries 
+ */
+export async function backOff(retries = 0) {
+  await new Promise(resolve => setTimeout(resolve, (retries + 1) * 1000));
+}
+
+/**
+ * Buildkite utilities.
+ */
+
+/**
+ * Uploads an artifact to buildkite.
+ * @param {string} path
+ * @param {string} [cwd]
+ */
+export async function buildkiteUploadArtifact(path, cwd) {
+  const args = ["artifact", "upload", path];
+  if (isVerbose) {
+    args.push("--log-level", "debug");
+  }
+  await spawn("buildkite-agent", args, { cwd: dirname(path) });
+}
+
+/**
+ * @typedef {Object} BuildkiteDownloadArtifactOptions
+ * @property {string} step
+ * @property {string} [filename]
+ * @property {string} [cwd]
+ * @property {number} [retries]
+ */
+
+/**
+ * Downloads an artifact from buildkite.
+ * @param {BuildkiteDownloadArtifactOptions} options 
+ */
+export async function buildkiteDownloadArtifact(options) {
+  const { step, filename, cwd, retries = 5 } = options;
+
+  const args = ["artifact", "download", "--step", step, filename || "**"];
+  if (isVerbose || !retries) {
+    args.push("--log-level", "debug");
+  }
+
+  while (retries--) {
+    try {
+      await spawn("buildkite-agent", args, { cwd });
+    } catch (cause) {
+      if (retries === 0) {
+        throw cause;
+      }
+      emitWarning(cause);
+      if (isBusy(cause)) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        continue;
+      }
     }
   }
 }
