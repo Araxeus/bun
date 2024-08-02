@@ -283,6 +283,7 @@ async function main() {
       if (isCI && homePath) {
         return resolve(homePath, ".cache", debug ? "debug" : "release", target);
       }
+      return resolve(cwd, ".cache");
     },
   });
 
