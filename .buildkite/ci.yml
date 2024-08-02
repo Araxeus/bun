@@ -55,7 +55,7 @@ steps:
   - key: "linux-x64-baseline"
     group: ":linux: x64"
     steps:
-      - key: "linux-x64-build-deps"
+      - key: "linux-x64-baseline-build-deps"
         label: ":linux: x64 - build-deps"
         agents:
           queue: "build-linux"
