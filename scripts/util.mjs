@@ -1,19 +1,23 @@
 #!/usr/bin/env node
 
+/**
+ * These are utilities that are used by multiple scripts.
+ */
+
 import * as cp from "node:child_process";
 import * as fs from "node:fs";
-import path, { basename, dirname } from "node:path";
+import path, { dirname } from "node:path";
 import { normalize as normalizeWindows } from "node:path/win32";
 import { hostname, tmpdir, release } from "node:os";
 
-export const isVerbose = process.argv.includes("--verbose");
-export const isQuiet = process.argv.includes("--quiet");
 export const isWindows = process.platform === "win32";
 export const isMacOS = process.platform === "darwin";
 export const isLinux = process.platform === "linux";
 export const isBuildKite = process.env["BUILDKITE"] === "true";
 export const isGithubAction = process.env["GITHUB_ACTIONS"] === "true";
 export const isCI = isBuildKite || isGithubAction || process.env["CI"] === "true";
+export const isVerbose = process.argv.includes("--verbose");
+export const isQuiet = process.argv.includes("--quiet");
 
 /**
  * Machine properties.
@@ -797,8 +801,8 @@ export function listFiles(path, options = {}) {
 
 /**
  * Creates a symlink to a file.
- * @param {string} source 
- * @param {string} target 
+ * @param {string} source
+ * @param {string} target
  */
 export function symlinkFile(source, target) {
   fs.symlinkSync(source, target);
@@ -942,6 +946,7 @@ export async function spawn(command, args, options = {}) {
     try {
       subprocess = cp.spawn(command, args, {
         stdio: ["ignore", "pipe", "pipe"],
+        env: process.env,
         ...options,
       });
       subprocess.on("error", reject);
@@ -1003,6 +1008,7 @@ export function spawnSync(command, args, options = {}) {
     const { error, status, signal, stdout, stderr } = cp.spawnSync(command, args, {
       stdio: ["ignore", "pipe", "pipe"],
       encoding: "utf-8",
+      env: process.env,
       ...options,
     });
     if (error) {
@@ -1536,7 +1542,7 @@ export async function runTask(label, fn) {
 
 /**
  * Gets whether an error is busy and needs a backoff.
- * @param {unknown} error 
+ * @param {unknown} error
  * @returns {boolean}
  */
 export function isBusy(error) {
@@ -1548,7 +1554,7 @@ export function isBusy(error) {
 }
 
 /**
- * @param {*} retries 
+ * @param {*} retries
  */
 export async function backOff(retries = 0) {
   await new Promise(resolve => setTimeout(resolve, (retries + 1) * 1000));
@@ -1581,7 +1587,7 @@ export async function buildkiteUploadArtifact(path, cwd) {
 
 /**
  * Downloads an artifact from buildkite.
- * @param {BuildkiteDownloadArtifactOptions} options 
+ * @param {BuildkiteDownloadArtifactOptions} options
  */
 export async function buildkiteDownloadArtifact(options) {
   const { step, filename, cwd, retries = 5 } = options;
