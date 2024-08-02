@@ -4,7 +4,7 @@
  * This script builds bun and its dependencies.
  */
 
-import { basename } from "node:path";
+import { basename, relative } from "node:path";
 import {
   emitWarning,
   fatalError,
@@ -38,9 +38,7 @@ import {
   compareSemver,
   isBuildKite,
   buildkiteUploadArtifact,
-  mkdirTemp,
   getGitSha,
-  getGitRepository,
   isGithubAction,
   isWindows,
   isMacOS,
@@ -405,7 +403,7 @@ export async function build(name, options = {}) {
  * @param {BuildOptions} options
  * @param {"deps" | "cpp" | "zig" | "link" | undefined} target
  */
-export async function buildBun(options, target) {
+async function buildBun(options, target) {
   const { buildPath: basePath, clean, jobs } = options;
 
   const depsPath = join(basePath, "bun-deps");
@@ -645,8 +643,8 @@ const dependencies = {
  * Builds all dependencies.
  * @param {BuildOptions} options
  */
-export async function buildDependencies(options) {
-  const { clean, buildPath } = options;
+async function buildDependencies(options) {
+  const { os, clean, buildPath } = options;
 
   if (clean) {
     const depOutPath = join(buildPath, "bun-deps");
@@ -654,6 +652,9 @@ export async function buildDependencies(options) {
   }
 
   for (const name of Object.keys(dependencies)) {
+    if (name === "libuv" && os !== "windows") {
+      continue;
+    }
     await buildDependency(name, options);
   }
 }
@@ -663,7 +664,7 @@ export async function buildDependencies(options) {
  * @param {keyof typeof dependencies} name
  * @param {BuildOptions} options
  */
-export async function buildDependency(name, options = {}) {
+async function buildDependency(name, options = {}) {
   const dependency = dependencies[name];
   if (!dependency) {
     throw new Error(`Unknown dependency: ${name}`);
@@ -678,8 +679,9 @@ export async function buildDependency(name, options = {}) {
     artifact: name,
     cwd: depPath,
     buildPath: depBuildPath,
-    // FIXME: Figure out linking issues when dependencies are built in debug mode.
-    // debug: false,
+    // TODO: Dependencies have historically been built in release mode.
+    // We should change this, but there are various issues with linking.
+    debug: false,
   };
 
   async function build() {
@@ -733,6 +735,10 @@ async function buildBoringSsl(options) {
     artifacts = ["libcrypto.a", "libssl.a", "libdecrepit.a"];
   }
 
+  if (isCached(options, artifacts)) {
+    return artifacts;
+  }
+
   await cmakeGenerateBuild(options);
   await cmakeBuild(options, ...artifacts);
 
@@ -753,6 +759,11 @@ async function buildCares(options) {
     artifacts = ["libcares.a"];
   }
 
+  const artifactPaths = artifacts.map(artifact => join("lib", artifact));
+  if (isCached(options, artifactPaths)) {
+    return artifactPaths;
+  }
+
   await cmakeGenerateBuild(
     { ...options, pic: true },
     "-DCARES_STATIC=ON",
@@ -761,7 +772,7 @@ async function buildCares(options) {
   );
   await cmakeBuild(options, ...artifacts);
 
-  return artifacts.map(artifact => join("lib", artifact));
+  return artifactPaths;
 }
 
 /**
@@ -776,6 +787,11 @@ async function buildLibarchive(options) {
     artifacts = ["archive.lib"];
   } else {
     artifacts = ["libarchive.a"];
+  }
+
+  const artifactPaths = artifacts.map(artifact => join("libarchive", artifact));
+  if (isCached(options, artifactPaths)) {
+    return artifactPaths;
   }
 
   await cmakeGenerateBuild(
@@ -804,7 +820,7 @@ async function buildLibarchive(options) {
   );
   await cmakeBuild(options, "archive_static");
 
-  return artifacts.map(artifact => join("libarchive", artifact));
+  return artifactPaths;
 }
 
 /**
@@ -819,6 +835,10 @@ async function buildLibdeflate(options) {
     artifacts = ["deflatestatic.lib"];
   } else {
     artifacts = ["libdeflate.a"];
+  }
+
+  if (isCached(options, artifacts)) {
+    return artifacts;
   }
 
   await cmakeGenerateBuild(
@@ -837,10 +857,11 @@ async function buildLibdeflate(options) {
  * @returns {Promise<string[]>}
  */
 async function buildLibuv(options) {
-  const { os, cwd } = options;
+  const { cwd } = options;
 
-  if (os !== "windows") {
-    return [];
+  const artifacts = ["libuv.lib"];
+  if (isCached(options, artifacts)) {
+    return artifacts;
   }
 
   await gitClone({
@@ -852,7 +873,7 @@ async function buildLibuv(options) {
   await cmakeGenerateBuild(options, "-DCMAKE_C_FLAGS=/DWIN32 /D_WINDOWS -Wno-int-conversion");
   await cmakeBuild(options);
 
-  return ["libuv.lib"];
+  return artifacts;
 }
 
 /**
@@ -860,7 +881,7 @@ async function buildLibuv(options) {
  * @returns {Promise<string[]>}
  */
 async function buildLolhtml(options) {
-  const { os, cwd } = options;
+  const { os, cwd, debug } = options;
 
   let artifacts;
   if (os === "windows") {
@@ -869,10 +890,17 @@ async function buildLolhtml(options) {
     artifacts = ["liblolhtml.a"];
   }
 
-  const capiPath = join(cwd, "c-api");
-  const targetPath = await cargoBuild({ ...options, cwd: capiPath });
+  const target = getRustTarget(options);
+  const targetPath = join(target, debug ? "debug" : "release");
+  const artifactPaths = artifacts.map(artifact => join(targetPath, artifact));
+  if (isCached(options, artifactPaths)) {
+    return artifactPaths;
+  }
 
-  return artifacts.map(artifact => join(targetPath, artifact));
+  const capiPath = join(cwd, "c-api");
+  await cargoBuild({ ...options, cwd: capiPath });
+
+  return artifactPaths;
 }
 
 /**
@@ -887,6 +915,10 @@ async function buildLshpack(options) {
     artifacts = ["ls-hpack.lib"];
   } else {
     artifacts = ["libls-hpack.a"];
+  }
+
+  if (isCached(options, artifacts)) {
+    return artifacts;
   }
 
   await cmakeGenerateBuild(options, "-DLSHPACK_XXH=ON", "-DSHARED=0");
@@ -908,6 +940,10 @@ async function buildMimalloc(options) {
     artifacts = ["mimalloc-static.lib"];
   } else {
     artifacts = [`${name}.a`, `${name}.o`];
+  }
+
+  if (isCached(options, artifacts)) {
+    return artifacts;
   }
 
   const flags = [
@@ -945,6 +981,17 @@ async function buildMimalloc(options) {
  */
 async function buildTinycc(options) {
   const { os, cwd, buildPath, cc, ccache, ar, debug, clean, jobs } = options;
+
+  let artifacts;
+  if (os === "windows") {
+    artifacts = ["tcc.lib"];
+  } else {
+    artifacts = ["libtcc.a"];
+  }
+
+  if (isCached(options, artifacts)) {
+    return artifacts;
+  }
 
   // tinycc doesn't support out-of-source builds, so we need to copy the source
   // directory to the build directory.
@@ -997,7 +1044,6 @@ async function buildTinycc(options) {
       { cwd: buildPath },
     );
     await spawn(ar, ["tcc.obj", "-OUT:tcc.lib"], { cwd: buildPath });
-    return ["tcc.lib"];
   } else {
     const args = [
       "--config-predefs=yes",
@@ -1025,8 +1071,9 @@ async function buildTinycc(options) {
     }
 
     await spawn("make", ["libtcc.a", "-j", `${jobs}`], { cwd: buildPath });
-    return ["libtcc.a"];
   }
+
+  return artifacts;
 }
 
 /**
@@ -1035,6 +1082,17 @@ async function buildTinycc(options) {
  */
 async function buildZlib(options) {
   const { os, cwd } = options;
+
+  let artifacts;
+  if (os === "windows") {
+    artifacts = ["zlib.lib"];
+  } else {
+    artifacts = ["libz.a"];
+  }
+
+  if (isCached(options, artifacts)) {
+    return artifacts;
+  }
 
   // TODO: Make a patch to zlib for clang-cl, which implements `__builtin_ctzl` and `__builtin_expect`
   if (os === "windows") {
@@ -1046,13 +1104,6 @@ async function buildZlib(options) {
       writeFile(filePath, fileContent.slice(0, start) + "#ifdef FALSE\n" + fileContent.slice(end));
       print("Patched deflate.h");
     }
-  }
-
-  let artifacts;
-  if (os === "windows") {
-    artifacts = ["zlib.lib"];
-  } else {
-    artifacts = ["libz.a"];
   }
 
   await cmakeGenerateBuild(options);
@@ -1075,11 +1126,35 @@ async function buildZstd(options) {
     artifacts = ["libzstd.a"];
   }
 
+  const artifactPaths = artifacts.map(artifact => join("lib", artifact));
+  if (isCached(options, artifactPaths)) {
+    return artifactPaths;
+  }
+
   const cmakePath = join(cwd, "build", "cmake");
   await cmakeGenerateBuild({ ...options, cwd: cmakePath }, "-DZSTD_BUILD_STATIC=ON");
   await cmakeBuild(options, ...artifacts);
 
-  return artifacts.map(artifact => join("lib", artifact));
+  return artifactPaths;
+}
+
+/**
+ * Gets whether the artifacts are cached.
+ * @param {BuildOptions} options
+ * @param {string[]} artifacts
+ * @returns {boolean}
+ */
+function isCached(options, artifacts) {
+  const { clean, buildPath } = options;
+
+  if (clean) {
+    return false;
+  }
+
+  return artifacts
+    .map(artifact => join(buildPath, artifact))
+    .map(path => isFile(path))
+    .every(Boolean);
 }
 
 /**
@@ -1091,7 +1166,7 @@ async function buildZstd(options) {
  * @param {BuildOptions} options
  * @returns {string[]}
  */
-export function getCFlags(options) {
+function getCFlags(options) {
   const { cwd, os, arch, baseline, lto, pic, osxVersion, llvmVersion, artifact } = options;
   const flags = [];
 
@@ -1169,7 +1244,7 @@ export function getCFlags(options) {
  * @param {BuildOptions} options
  * @returns {string[]}
  */
-export function getCxxFlags(options) {
+function getCxxFlags(options) {
   const { os, lto, artifact } = options;
   const flags = getCFlags(options);
 
@@ -1193,7 +1268,7 @@ export function getCxxFlags(options) {
  * @param {BuildOptions} options
  * @returns {string[]}
  */
-export function getLdFlags(options) {
+function getLdFlags(options) {
   const { os, lto, ld } = options;
   const flags = [];
 
@@ -1220,7 +1295,7 @@ export function getLdFlags(options) {
  * @param {BuildOptions} options
  * @returns {string[]}
  */
-export function getCmakeFlags(options) {
+function getCmakeFlags(options) {
   const { cwd, buildPath, debug, os, cc, cxx, ar, ranlib, ld, ccache, osxVersion } = options;
 
   const cflags = getCFlags(options);
@@ -1282,7 +1357,7 @@ export function getCmakeFlags(options) {
  * @param {BuildOptions} options
  * @param {...string} extraArgs
  */
-export async function cmakeGenerateBuild(options, ...extraArgs) {
+async function cmakeGenerateBuild(options, ...extraArgs) {
   const args = getCmakeFlags(options);
 
   await spawn("cmake", [...args, ...extraArgs]);
@@ -1293,7 +1368,7 @@ export async function cmakeGenerateBuild(options, ...extraArgs) {
  * @param {BuildOptions} options
  * @param {string[]} [targets]
  */
-export async function cmakeBuild(options, ...targets) {
+async function cmakeBuild(options, ...targets) {
   const { cwd, buildPath, debug, clean, jobs } = options;
 
   const args = ["--build", buildPath || ".", "--parallel", `${jobs}`];
@@ -1316,23 +1391,20 @@ export async function cmakeBuild(options, ...targets) {
  * Runs cargo to build a Rust project.
  * @param {BuildOptions} options
  * @param {string} [target]
- * @returns {Promise<string>}
  */
-export async function cargoBuild(options) {
+async function cargoBuild(options) {
   const { cwd, buildPath, debug, jobs } = options;
 
   const target = getRustTarget(options);
-  const targetPath = buildPath || join(cwd, "build");
-  const args = ["build", "--target-dir", targetPath, "--target", target, "--jobs", `${jobs}`];
+  const args = ["build", "--target-dir", buildPath, "--target", target, "--jobs", `${jobs}`];
   if (!debug) {
     args.push("--release");
   }
   if (isVerbose) {
     args.push("--verbose");
   }
-  await spawn("cargo", args, { cwd });
 
-  return join(targetPath, target, debug ? "debug" : "release");
+  await spawn("cargo", args, { cwd });
 }
 
 /**
@@ -1344,7 +1416,7 @@ export async function cargoBuild(options) {
  * @param {string} name
  * @returns {boolean}
  */
-export function isSystemEnv(name) {
+function isSystemEnv(name) {
   return (
     /^(?:PATH|HOME|USER|PWD|TERM)$/i.test(name) ||
     /^(?:TMP|TEMP|TMPDIR|TEMPDIR|RUNNER_TEMP)$/i.test(name) ||
@@ -1360,7 +1432,7 @@ export function isSystemEnv(name) {
  * Gets the environment variables for building bun.
  * @param {BuildOptions} options
  */
-export function getBuildEnv(options) {
+function getBuildEnv(options) {
   const env = {
     ...getCcacheEnv(options),
     ...getZigEnv(options),
@@ -1384,7 +1456,7 @@ export function getBuildEnv(options) {
  * @param {BuildOptions} options
  * @returns {Record<string, string>}
  */
-export function getCcacheEnv(options) {
+function getCcacheEnv(options) {
   const { cwd, cachePath, cacheStrategy, artifact } = options;
   const ccacheBasePath = cachePath || join(cwd, ".cache");
   const ccachePath = join(ccacheBasePath, "ccache");
@@ -1425,7 +1497,7 @@ export function getCcacheEnv(options) {
  * @param {BuildOptions} options
  * @returns {Record<string, string>}
  */
-export function getZigEnv(options) {
+function getZigEnv(options) {
   const { cwd, cachePath, buildPath } = options;
   const zigBasePath = cachePath || join(cwd, ".cache");
   const zigCachePath = join(zigBasePath, "zig-cache");
@@ -1451,7 +1523,7 @@ export function getZigEnv(options) {
  * @param {BuildOptions} options
  * @returns {Record<string, string>}
  */
-export function getBunEnv(options) {
+function getBunEnv(options) {
   const { cachePath, cwd } = options;
   const bunBasePath = cachePath || join(cwd, ".cache");
   const bunCachePath = join(bunBasePath, "bun-install");
@@ -1475,7 +1547,7 @@ export function getBunEnv(options) {
  * @param {BuildOptions} options
  * @returns {string}
  */
-export function getRustTarget(options) {
+function getRustTarget(options) {
   const { os, arch } = options;
   const target = `${os}-${arch}`;
   switch (target) {
@@ -1499,7 +1571,7 @@ export function getRustTarget(options) {
  * @param {BuildOptions} options
  * @returns {string}
  */
-export function getZigTarget(options) {
+function getZigTarget(options) {
   const { os, arch } = options;
   const target = `${os}-${arch}`;
   switch (target) {
