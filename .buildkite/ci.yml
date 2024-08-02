@@ -8,61 +8,61 @@
 # for a particular commit.
 
 steps:
-  - key: "darwin-aarch64"
-    group: ":darwin: aarch64"
-    steps:
-      - key: "darwin-aarch64-build-deps"
-        label: ":darwin: aarch64 - build-deps"
-        agents:
-          queue: "build-darwin"
-          os: "darwin"
-          arch: "aarch64"
-        command:
-          - "./scripts/build.mjs bun-deps"
-  - key: "darwin-x64"
-    group: ":darwin: x64"
-    steps:
-      - key: "darwin-x64-build-deps"
-        label: ":darwin: x64 - build-deps"
-        agents:
-          queue: "build-darwin"
-          os: "darwin"
-          arch: "x64"
-        command:
-          - "./scripts/build.mjs bun-deps"
-  - key: "linux-aarch64"
-    group: ":linux: aarch64"
-    steps:
-      - key: "linux-aarch64-build-deps"
-        label: ":linux: aarch64 - build-deps"
-        agents:
-          queue: "build-linux"
-          os: "linux"
-          arch: "aarch64"
-        command:
-          - "./scripts/build.mjs bun-deps"
-  - key: "linux-x64"
-    group: ":linux: x64"
-    steps:
-      - key: "linux-x64-build-deps"
-        label: ":linux: x64 - build-deps"
-        agents:
-          queue: "build-linux"
-          os: "linux"
-          arch: "x64"
-        command:
-          - "./scripts/build.mjs bun-deps"
-  - key: "linux-x64-baseline"
-    group: ":linux: x64"
-    steps:
-      - key: "linux-x64-baseline-build-deps"
-        label: ":linux: x64 - build-deps"
-        agents:
-          queue: "build-linux"
-          os: "linux"
-          arch: "x64"
-        command:
-          - "./scripts/build.mjs bun-deps --baseline"
+  # - key: "darwin-aarch64"
+  #   group: ":darwin: aarch64"
+  #   steps:
+  #     - key: "darwin-aarch64-build-deps"
+  #       label: ":darwin: aarch64 - build-deps"
+  #       agents:
+  #         queue: "build-darwin"
+  #         os: "darwin"
+  #         arch: "aarch64"
+  #       command:
+  #         - "./scripts/build.mjs bun-deps"
+  # - key: "darwin-x64"
+  #   group: ":darwin: x64"
+  #   steps:
+  #     - key: "darwin-x64-build-deps"
+  #       label: ":darwin: x64 - build-deps"
+  #       agents:
+  #         queue: "build-darwin"
+  #         os: "darwin"
+  #         arch: "x64"
+  #       command:
+  #         - "./scripts/build.mjs bun-deps"
+  # - key: "linux-aarch64"
+  #   group: ":linux: aarch64"
+  #   steps:
+  #     - key: "linux-aarch64-build-deps"
+  #       label: ":linux: aarch64 - build-deps"
+  #       agents:
+  #         queue: "build-linux"
+  #         os: "linux"
+  #         arch: "aarch64"
+  #       command:
+  #         - "./scripts/build.mjs bun-deps"
+  # - key: "linux-x64"
+  #   group: ":linux: x64"
+  #   steps:
+  #     - key: "linux-x64-build-deps"
+  #       label: ":linux: x64 - build-deps"
+  #       agents:
+  #         queue: "build-linux"
+  #         os: "linux"
+  #         arch: "x64"
+  #       command:
+  #         - "./scripts/build.mjs bun-deps"
+  # - key: "linux-x64-baseline"
+  #   group: ":linux: x64"
+  #   steps:
+  #     - key: "linux-x64-baseline-build-deps"
+  #       label: ":linux: x64 - build-deps"
+  #       agents:
+  #         queue: "build-linux"
+  #         os: "linux"
+  #         arch: "x64"
+  #       command:
+  #         - "./scripts/build.mjs bun-deps --baseline"
   - key: "windows-x64"
     group: ":windows: x64"
     steps:
