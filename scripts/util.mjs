@@ -6,7 +6,7 @@
 
 import * as cp from "node:child_process";
 import * as fs from "node:fs";
-import path, { dirname } from "node:path";
+import path, { dirname, relative } from "node:path";
 import { normalize as normalizeWindows } from "node:path/win32";
 import { hostname, tmpdir, release } from "node:os";
 
@@ -18,6 +18,7 @@ export const isGithubAction = process.env["GITHUB_ACTIONS"] === "true";
 export const isCI = isBuildKite || isGithubAction || process.env["CI"] === "true";
 export const isVerbose = process.argv.includes("--verbose") || isCI;
 export const isQuiet = process.argv.includes("--quiet");
+export const isDebug = process.argv.includes("--debug") || process.env["DEBUG"] === "1";
 
 /**
  * Machine properties.
@@ -1583,12 +1584,13 @@ export async function backOff(retries = 0) {
  * @param {string} path
  * @param {string} [cwd]
  */
-export async function buildkiteUploadArtifact(path, cwd) {
-  const args = ["artifact", "upload", path];
-  if (isVerbose) {
+export async function buildkiteUploadArtifact(path, cwd = dirname(path)) {
+  const filename = relative(cwd, path);
+  const args = ["artifact", "upload", filename];
+  if (isDebug) {
     args.push("--log-level", "debug");
   }
-  await spawn("buildkite-agent", args, { cwd: dirname(path) });
+  await spawn("buildkite-agent", args, { cwd });
 }
 
 /**

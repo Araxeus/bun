@@ -207,6 +207,7 @@ async function main() {
 
   const exactLlvmVersion = skipLlvmVersion ? undefined : llvmVersion;
   const majorLlvmVersion = llvmVersion.split(".")[0];
+
   const llvmPath = getLlvmPath(exactLlvmVersion);
   if (llvmPath) {
     addToPath(llvmPath);
@@ -1426,12 +1427,12 @@ async function cargoBuild(options) {
     args.push("--verbose");
   }
 
-  // FIXME: spawn cargo EACCES in CI
+  // FIXME: cargo is not set to PATH on Linux CI
   if (isCI && os === "linux") {
-    await spawn("bash", ["-c", `cargo ${args.join(" ")}`], { cwd });
-  } else {
-    await spawn("cargo", args, { cwd });
+    addToPath(join(process.env["HOME"], ".cargo", "bin"));
   }
+
+  await spawn("cargo", args, { cwd });
 }
 
 /**
