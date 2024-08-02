@@ -37,6 +37,9 @@ if (!(Test-Path $buildScript)) {
   throw "Build script not found: $buildScript"
 }
 
+$cwd = Split-Path -Path $scriptsDir -Parent
+Push-Location $cwd
+
 Write-Host "> $buildScript $args"
 . node $buildScript $args
 
