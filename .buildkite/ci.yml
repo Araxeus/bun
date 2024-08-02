@@ -77,7 +77,7 @@ steps:
   - key: "windows-x64-baseline"
     group: ":windows: x64"
     steps:
-      - key: "windows-x64-build-deps"
+      - key: "windows-x64-baseline-build-deps"
         label: ":windows: x64 - build-deps"
         agents:
           queue: "build-windows"
