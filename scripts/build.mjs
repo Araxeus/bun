@@ -1181,7 +1181,7 @@ function getCFlags(options) {
 
   // Relocates debug info from an absolute path to a relative path
   // https://ccache.dev/manual/4.8.2.html#_compiling_in_different_directories
-  if (cwd) {
+  if (cwd && os !== "windows") {
     flags.push(`-fdebug-prefix-map=${cwd}=.`);
   }
 
