@@ -367,9 +367,8 @@ async function main() {
   });
 
   if (printAndExit || isCI) {
-    print("Arguments:", args);
-    print("Options:", options);
-    print("Environment:", process.env);
+    await runTask("Options", () => console.log(options));
+    await runTask("Environment", () => console.log(process.env));
     if (printAndExit) {
       process.exit(0);
     }
@@ -721,7 +720,7 @@ async function buildDependency(name, options = {}) {
     }
 
     if (isBuildKite) {
-      buildkiteUploadArtifact(path);
+      await buildkiteUploadArtifact(path);
     } else {
       copyFile(path, join(depOutPath, basename(path)));
     }
@@ -1015,7 +1014,7 @@ async function buildTinycc(options) {
 
   if (os === "windows") {
     const version = readFile(join(cwd, "VERSION"), "utf-8");
-    const { stdout: revision } = spawnSync("git", ["rev-parse", "HEAD"], { cwd: buildPath });
+    const { stdout: revision } = spawnSync("git", ["rev-parse", "HEAD"], { cwd });
     const configText = `#define TCC_VERSION "${version.trim()}"
 #define TCC_GITHASH "${revision.trim()}"
 #define CONFIG_TCCDIR "${cwd.replace(/\\/g, "/")}"
