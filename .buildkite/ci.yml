@@ -73,7 +73,7 @@ steps:
           os: "windows"
           arch: "x64"
         command:
-          - "./scripts/build.mjs bun-deps"
+          - "node .\\scripts\\build.mjs bun-deps"
   - key: "windows-x64-baseline"
     group: ":windows: x64"
     steps:
@@ -84,4 +84,4 @@ steps:
           os: "windows"
           arch: "x64"
         command:
-          - "./scripts/build.mjs bun-deps --baseline"
+          - "node .\\scripts\\build.mjs bun-deps --baseline"

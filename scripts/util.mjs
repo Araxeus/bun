@@ -16,7 +16,7 @@ export const isLinux = process.platform === "linux";
 export const isBuildKite = process.env["BUILDKITE"] === "true";
 export const isGithubAction = process.env["GITHUB_ACTIONS"] === "true";
 export const isCI = isBuildKite || isGithubAction || process.env["CI"] === "true";
-export const isVerbose = process.argv.includes("--verbose");
+export const isVerbose = process.argv.includes("--verbose") || isCI;
 export const isQuiet = process.argv.includes("--quiet");
 
 /**
@@ -1514,6 +1514,20 @@ export function compareSemver(a, b) {
  */
 
 /**
+ * Adds a path to the PATH environment variable.
+ * @param {string} binPath
+ */
+export function addToPath(binPath) {
+  const delim = isWindows ? ";" : ":";
+  const path = process.env["PATH"];
+
+  if (path && !path.includes(binPath)) {
+    print(`Adding ${binPath} to PATH`);
+    process.env["PATH"] = `${path}${delim}${binPath}`;
+  }
+}
+
+/**
  * Runs a task with a label.
  * @param {string} label
  * @param {Function} fn
@@ -1554,7 +1568,7 @@ export function isBusy(error) {
 }
 
 /**
- * @param {*} retries
+ * @param {number} retries
  */
 export async function backOff(retries = 0) {
   await new Promise(resolve => setTimeout(resolve, (retries + 1) * 1000));

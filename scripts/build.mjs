@@ -4,7 +4,7 @@
  * This script builds bun and its dependencies.
  */
 
-import { basename, relative } from "node:path";
+import { basename } from "node:path";
 import {
   emitWarning,
   fatalError,
@@ -42,6 +42,8 @@ import {
   isGithubAction,
   isWindows,
   isMacOS,
+  spawnSync,
+  addToPath,
 } from "./util.mjs";
 
 /**
@@ -205,6 +207,10 @@ async function main() {
 
   const exactLlvmVersion = skipLlvmVersion ? undefined : llvmVersion;
   const majorLlvmVersion = llvmVersion.split(".")[0];
+  const llvmPath = getLlvmPath(options);
+  if (llvmPath) {
+    addToPath(llvmPath);
+  }
 
   const cc = getCommand({
     name: "cc",
@@ -1349,6 +1355,24 @@ function getCmakeFlags(options) {
 }
 
 /**
+ * @param {BuildOptions} options
+ */
+function getLlvmPath(options) {
+  const { os, llvmVersion } = options;
+
+  if (os === "darwin") {
+    const llvmMajorVersion = llvmVersion?.split(".")[0];
+    const packageName = llvmMajorVersion ? `llvm@${llvmMajorVersion}` : "llvm";
+
+    const { stdout } = spawnSync("brew", ["--prefix", packageName], { throwOnError: false });
+    const llvmPath = join(stdout.trim(), "bin");
+    if (isDirectory(llvmPath)) {
+      return llvmPath;
+    }
+  }
+}
+
+/**
  * Build commands.
  */
 
@@ -1393,7 +1417,7 @@ async function cmakeBuild(options, ...targets) {
  * @param {string} [target]
  */
 async function cargoBuild(options) {
-  const { cwd, buildPath, debug, jobs } = options;
+  const { os, cwd, buildPath, debug, jobs } = options;
 
   const target = getRustTarget(options);
   const args = ["build", "--target-dir", buildPath, "--target", target, "--jobs", `${jobs}`];
@@ -1404,7 +1428,12 @@ async function cargoBuild(options) {
     args.push("--verbose");
   }
 
-  await spawn("cargo", args, { cwd });
+  // FIXME: spawn cargo EACCES in CI
+  if (isCI && os === "linux") {
+    await spawn("bash", ["-c", `cargo ${args.join(" ")}`], { cwd });
+  } else {
+    await spawn("cargo", args, { cwd });
+  }
 }
 
 /**
