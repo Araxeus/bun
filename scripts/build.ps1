@@ -38,7 +38,7 @@ if (!(Test-Path $buildScript)) {
 }
 
 Write-Host "> $buildScript $args"
-& node $buildScript $args
+. node $buildScript $args
 
 $result = $LASTEXITCODE
 if ($result -ne 0) {
