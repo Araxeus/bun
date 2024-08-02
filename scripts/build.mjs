@@ -207,7 +207,7 @@ async function main() {
 
   const exactLlvmVersion = skipLlvmVersion ? undefined : llvmVersion;
   const majorLlvmVersion = llvmVersion.split(".")[0];
-  const llvmPath = getLlvmPath(options);
+  const llvmPath = getLlvmPath(exactLlvmVersion);
   if (llvmPath) {
     addToPath(llvmPath);
   }
@@ -1355,16 +1355,14 @@ function getCmakeFlags(options) {
 }
 
 /**
- * @param {BuildOptions} options
+ * @param {string} [llvmVersion]
  */
-function getLlvmPath(options) {
-  const { os, llvmVersion } = options;
+function getLlvmPath(llvmVersion) {
+  const llvmMajorVersion = llvmVersion?.split(".")[0];
 
-  if (os === "darwin") {
-    const llvmMajorVersion = llvmVersion?.split(".")[0];
-    const packageName = llvmMajorVersion ? `llvm@${llvmMajorVersion}` : "llvm";
-
-    const { stdout } = spawnSync("brew", ["--prefix", packageName], { throwOnError: false });
+  if (isMacOS) {
+    const brewName = llvmMajorVersion ? `llvm@${llvmMajorVersion}` : "llvm";
+    const { stdout } = spawnSync("brew", ["--prefix", brewName], { throwOnError: false });
     const llvmPath = join(stdout.trim(), "bin");
     if (isDirectory(llvmPath)) {
       return llvmPath;
