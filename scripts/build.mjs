@@ -184,7 +184,6 @@ async function main() {
     name: "clean",
     description: "If directories should be cleaned before building",
     type: "boolean",
-    defaultValue: isCI,
   });
 
   const osxVersion = getOption({
@@ -279,7 +278,12 @@ async function main() {
   const cachePath = getOption({
     name: "cache-path",
     description: "The path to use for build caching",
-    defaultValue: () => resolve(cwd, ".cache"),
+    defaultValue: () => {
+      const homePath = process.env["HOME"];
+      if (isCI && homePath) {
+        return resolve(homePath, ".cache", debug ? "debug" : "release", target);
+      }
+    },
   });
 
   const noCache = getOption({
