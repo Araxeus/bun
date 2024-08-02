@@ -9,6 +9,7 @@ import * as fs from "node:fs";
 import path, { dirname, relative } from "node:path";
 import { normalize as normalizeWindows } from "node:path/win32";
 import { hostname, tmpdir, release } from "node:os";
+import { inspect } from "node:util";
 
 export const isWindows = process.platform === "win32";
 export const isMacOS = process.platform === "darwin";
@@ -1107,7 +1108,7 @@ export function format(value) {
   } else if (typeof value === "string") {
     string = value;
   } else {
-    string = JSON.stringify(value, null, 2);
+    string = inspect(value);
   }
   return string.replace(/{(\w+)}/g, (_, color) => ansiColors[color] || "");
 }

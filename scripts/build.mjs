@@ -360,17 +360,19 @@ async function main() {
 
   const args = process.argv.slice(2).filter(arg => !arg.startsWith("-"));
 
-  const print = getOption({
+  const printAndExit = getOption({
     name: "print",
     description: "Print the options and exit",
     type: "boolean",
   });
 
-  if (print) {
-    console.log("Arguments:", args);
-    console.log("Options:", options);
-    console.log("Environment:", process.env);
-    process.exit(0);
+  if (printAndExit || isCI) {
+    print("Arguments:", args);
+    print("Options:", options);
+    print("Environment:", process.env);
+    if (printAndExit) {
+      process.exit(0);
+    }
   }
 
   if (args.length) {
