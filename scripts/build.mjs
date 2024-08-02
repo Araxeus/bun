@@ -1302,31 +1302,46 @@ function getLdFlags(options) {
 /**
  * Gets the CMake flags for the given options.
  * @param {BuildOptions} options
+ * @param {...string} [extraArgs]
  * @returns {string[]}
  */
-function getCmakeFlags(options) {
+function getCmakeFlags(options, ...extraArgs) {
   const { cwd, buildPath, debug, os, cc, cxx, ar, ranlib, ld, ccache, osxVersion } = options;
 
   const cflags = getCFlags(options);
   const cxxflags = getCxxFlags(options);
   const ldflags = getLdFlags(options);
 
+  /**
+   * @param {string} path
+   * @returns {string}
+   */
+  function cmakePath(path) {
+    // clang-cl doesn't support unescaped backslashes, otherwise it fails with:
+    // Invalid character escape '\U'
+    if (os === "windows") {
+      return path.replace(/\\/g, "/");
+    }
+    return path;
+  }
+
   const flags = [
-    cwd && `-S ${cwd}`,
-    buildPath && `-B ${buildPath}`,
+    cwd && `-S ${cmakePath(cwd)}`,
+    buildPath && `-B ${cmakePath(buildPath)}`,
     "-GNinja",
-    cc && `-DCMAKE_C_COMPILER=${cc}`,
+    cc && `-DCMAKE_C_COMPILER=${cmakePath(cc)}`,
     `-DCMAKE_C_FLAGS=${cflags.join(" ")}`,
     `-DCMAKE_C_STANDARD=17`,
     `-DCMAKE_C_STANDARD_REQUIRED=ON`,
-    cxx && `-DCMAKE_CXX_COMPILER=${cxx}`,
+    cxx && `-DCMAKE_CXX_COMPILER=${cmakePath(cxx)}`,
     `-DCMAKE_CXX_FLAGS=${cxxflags.join(" ")}`,
     `-DCMAKE_CXX_STANDARD=20`,
     `-DCMAKE_CXX_STANDARD_REQUIRED=ON`,
-    ld && `-DCMAKE_LINKER=${ld}`,
+    ld && `-DCMAKE_LINKER=${cmakePath(ld)}`,
     `-DCMAKE_LINKER_FLAGS=${ldflags.join(" ")}`,
     ar && `-DCMAKE_AR=${ar}`,
-    ranlib && `-DCMAKE_RANLIB=${ranlib}`,
+    ranlib && `-DCMAKE_RANLIB=${cmakePath(ranlib)}`,
+    ...extraArgs,
   ];
 
   if (debug) {
@@ -1336,7 +1351,10 @@ function getCmakeFlags(options) {
   }
 
   if (ccache) {
-    flags.push(`-DCMAKE_C_COMPILER_LAUNCHER=${ccache}`, `-DCMAKE_CXX_COMPILER_LAUNCHER=${ccache}`);
+    flags.push(
+      `-DCMAKE_C_COMPILER_LAUNCHER=${cmakePath(ccache)}`,
+      `-DCMAKE_CXX_COMPILER_LAUNCHER=${cmakePath(ccache)}`,
+    );
   }
 
   if (os === "linux") {
@@ -1383,9 +1401,8 @@ function getLlvmPath(llvmVersion) {
  * @param {...string} extraArgs
  */
 async function cmakeGenerateBuild(options, ...extraArgs) {
-  const args = getCmakeFlags(options);
-
-  await spawn("cmake", [...args, ...extraArgs]);
+  const args = getCmakeFlags(options, ...extraArgs);
+  await spawn("cmake", args);
 }
 
 /**

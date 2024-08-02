@@ -43,7 +43,5 @@ Push-Location $cwd
 Write-Host "> $buildScript $args"
 . node $buildScript $args
 
-$result = $LASTEXITCODE
-if ($result -ne 0) {
-  throw "$command $commandArgs exited with code $result."
-}
+Pop-Location
+exit $LASTEXITCODE
