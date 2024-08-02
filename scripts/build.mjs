@@ -1618,6 +1618,4 @@ function getZigTarget(options) {
   }
 }
 
-if (new URL(import.meta.url).pathname === process.argv[1]) {
-  await main();
-}
+await main();
