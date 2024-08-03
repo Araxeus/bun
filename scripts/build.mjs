@@ -1352,7 +1352,7 @@ function getLdFlags(options) {
  * @returns {string[]}
  */
 function getCmakeFlags(options, ...extraArgs) {
-  const { cwd, buildPath, debug, os, cc, cxx, ar, ranlib, ld, ccache, osxVersion } = options;
+  const { cwd, buildPath, debug, os, cc, cxx, ar, ranlib, ld, ccache, osxVersion, crossCompile } = options;
 
   const cflags = getCFlags(options);
   const cxxflags = getCxxFlags(options);
@@ -1412,6 +1412,10 @@ function getCmakeFlags(options, ...extraArgs) {
     }
   } else if (os === "windows") {
     flags.push("-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded");
+  }
+
+  if (crossCompile) {
+    flags.push("-DCMAKE_CXX_COMPILER_WORKS=1", "-DCMAKE_C_COMPILER_WORKS=1");
   }
 
   if (isVerbose) {
