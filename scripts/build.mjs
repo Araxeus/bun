@@ -46,6 +46,7 @@ import {
   addToPath,
   isGitPullRequestFork,
   getGitBranch,
+  isLinux,
 } from "./util.mjs";
 
 /**
@@ -191,6 +192,7 @@ async function main() {
     name: "clean",
     description: "If directories should be cleaned before building",
     type: "boolean",
+    defaultValue: isCI,
   });
 
   const osxVersion = getOption({
@@ -202,7 +204,7 @@ async function main() {
   const llvmVersion = getOption({
     name: "llvm-version",
     description: "The LLVM version to use",
-    defaultValue: os === "linux" ? "16.0.6" : "18.1.8",
+    defaultValue: isLinux ? "16.0.6" : "18.1.8",
   });
 
   const skipLlvmVersion = getOption({
