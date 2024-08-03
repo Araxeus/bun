@@ -549,9 +549,11 @@ async function buildBun(options, target) {
     await spawn("ninja", args, { cwd: linkPath });
   }
 
-  if (!target || target === "link") {
-    await runTask("Building bun", linkBun);
+  if (target && target !== "link") {
+    return;
   }
+
+  await runTask("Building bun", linkBun);
 
   async function prepareBun(name) {
     const exe = os === "windows" ? `${name}.exe` : name;
