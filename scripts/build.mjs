@@ -44,6 +44,8 @@ import {
   isMacOS,
   spawnSync,
   addToPath,
+  isGitPullRequestFork,
+  getGitBranch,
 } from "./util.mjs";
 
 /**
@@ -163,7 +165,12 @@ async function main() {
     name: "canary",
     description: "If the build is a canary build",
     type: "number",
-    defaultValue: 1,
+    defaultValue: () => {
+      if (!isGitPullRequestFork() && getGitBranch() === "main") {
+        return 1;
+      }
+      return 0;
+    },
   });
 
   const isBuild = getOption({
@@ -293,13 +300,11 @@ async function main() {
     type: "boolean",
   });
 
-  const cacheStrategy = noCache
-    ? "none"
-    : getOption({
-        name: "cache-strategy",
-        description: "The strategy for build caching (e.g. read-write, read, write, none)",
-        defaultValue: noCache ? "none" : "read-write",
-      });
+  const cacheStrategy = getOption({
+    name: "cache-strategy",
+    description: "The strategy for build caching (e.g. read-write, read, write, none)",
+    defaultValue: noCache ? "none" : "read-write",
+  });
 
   /**
    * @type {BuildOptions}
@@ -363,6 +368,14 @@ async function main() {
     }
   }
 
+  const noColor = getOption({
+    name: "no-color",
+    description: "If the output should be colorless",
+    type: "boolean",
+  });
+
+  process.env["FORCE_COLOR"] = noColor ? "0" : "1";
+
   const args = process.argv.slice(2).filter(arg => !arg.startsWith("-"));
 
   const printAndExit = getOption({
@@ -397,15 +410,8 @@ export async function build(name, options = {}) {
   if (!name.startsWith("bun")) {
     return buildDependency(name, options);
   }
-
-  switch (name) {
-    case "bun":
-      return buildBun(options);
-    case "bun-deps":
-      return buildDependencies(options);
-    default:
-      return buildDependency(name, options);
-  }
+  const [_, target] = name.split("-");
+  return buildBun(options, target);
 }
 
 /**
@@ -417,120 +423,152 @@ export async function build(name, options = {}) {
  * @param {"deps" | "cpp" | "zig" | "link" | undefined} target
  */
 async function buildBun(options, target) {
-  const { buildPath: basePath, clean, jobs } = options;
+  const { os, buildPath, jobs, clean } = options;
+  const { debug, baseline, lto, valgrind, assertions, canary, buildNumber } = options;
 
-  const depsPath = join(basePath, "bun-deps");
-  const zigPath = join(basePath, "bun-zig", "bun-zig.o");
-  const cppPath = join(basePath, "bun-cpp", "bun-cpp-objects.a");
-
-  const buildPath = join(basePath, target ? `bun-${target}` : "bun");
-  const buildOptions = {
-    ...options,
-    artifact: "bun",
-    buildPath: buildPath,
-  };
-
-  const cleanPath = target ? basePath : buildPath;
-  if (clean) {
-    removeFile(cleanPath);
+  if (clean && !target) {
+    removeFile(buildPath);
   }
 
-  const { baseline, lto, valgrind, assertions, canary, isBuild, buildNumber } = options;
-
-  const flags = ["-DNO_CONFIGURE_DEPENDS=ON", `-DBUN_DEPS_OUT_DIR=${depsPath}`];
-  if (buildNumber) {
-    flags.push(`-DBUILD_NUMBER=${buildNumber}`);
-  }
-  if (isBuild) {
-    flags.push(`-DBUILD=true`);
-  }
-  if (canary) {
-    flags.push(`-DCANARY=${canary}`);
-  }
-  if (baseline) {
-    flags.push("-DUSE_BASELINE_BUILD=ON");
-  }
-  if (lto) {
-    flags.push("-DUSE_LTO=ON");
-  }
-  if (assertions) {
-    flags.push("-DUSE_DEBUG_JSC=ON");
-  }
-  if (valgrind) {
-    flags.push("-DUSE_VALGRIND=ON");
-  }
-
-  if (target === "cpp") {
-    flags.push("-DBUN_CPP_ONLY=ON");
-  } else if (target === "zig") {
-    const zigTarget = getZigTarget(options);
-    flags.push(`-DZIG_TARGET=${zigTarget}`, "-DWEBKIT_DIR=omit", `-DBUN_ZIG_OBJ=${zigPath}`);
-  } else if (target === "link") {
-    flags.push("-DBUN_LINK_ONLY=1", `-DBUN_CPP_ARCHIVE=${cppPath}`, `-DBUN_ZIG_OBJ=${zigPath}`);
-  }
-
-  if (!target || target === "zig") {
-    await buildBunOldJs(options);
-  }
-
-  if (!target) {
+  if (!target || target === "deps") {
     await buildDependencies(options);
+    if (target === "deps") {
+      return;
+    }
   }
 
-  await cmakeGenerateBuild(buildOptions, ...flags);
+  /**
+   * @param {string} buildPath
+   * @param {...string} extraArgs
+   */
+  async function configure(buildPath, ...extraArgs) {
+    const args = [
+      "-DNO_CONFIGURE_DEPENDS=ON",
+      buildNumber && `-DBUILD_NUMBER=${buildNumber}`,
+      canary && `-DCANARY=${canary}`,
+      baseline && "-DUSE_BASELINE_BUILD=ON",
+      lto && "-DUSE_LTO=ON",
+      assertions && "-DUSE_DEBUG_JSC=ON",
+      valgrind && "-DUSE_VALGRIND=ON",
+      ...extraArgs,
+    ];
+
+    await cmakeGenerateBuild(
+      {
+        ...options,
+        artifact: "bun",
+        buildPath,
+      },
+      ...args.filter(Boolean),
+    );
+  }
 
   const args = ["-j", `${jobs}`];
   if (isVerbose) {
     args.push("-v");
   }
 
-  function buildCpp() {
-    const scriptPath = os === "windows" ? "compile-cpp-only.ps1" : "compile-cpp-only.sh";
-    const shell = os === "windows" ? "pwsh" : "bash";
-    return spawn(shell, [scriptPath, ...args], { cwd: buildPath });
+  const cppPath = join(buildPath, "bun-cpp");
+  const cppArchivePath = join(cppPath, "bun-cpp-objects.a");
+
+  async function buildCpp() {
+    const isWindows = os === "windows";
+    const scriptPath = isWindows ? "compile-cpp-only.ps1" : "compile-cpp-only.sh";
+    const shell = getCommand({
+      name: "shell",
+      command: isWindows ? "pwsh" : "bash",
+      aliases: isWindows ? ["powershell"] : ["sh"],
+    });
+
+    if (clean) {
+      removeFile(cppPath);
+    }
+
+    await configure(cppPath, "-DBUN_CPP_ONLY=ON");
+    await spawn(shell, [scriptPath, ...args], { cwd: cppPath });
+
+    if (isBuildKite) {
+      await buildkiteUploadArtifact(cppArchivePath);
+    }
   }
 
-  if (target) {
-    const args = ["-j", `${jobs}`];
-    if (isVerbose) {
-      args.push("-v");
+  if (!target || target === "cpp") {
+    await runTask("Building bun-cpp", buildCpp);
+  }
+
+  const zigPath = join(buildPath, "bun-zig");
+  const zigObjectPath = join(zigPath, "bun-zig.o");
+
+  async function buildZig() {
+    if (clean) {
+      removeFile(zigPath);
     }
-    if (target === "cpp") {
-      const scriptPath = join(buildPath, os === "windows" ? "compile-cpp-only.ps1" : "compile-cpp-only.sh");
-      const shell = os === "windows" ? "pwsh" : "bash";
-      await spawn(shell, [scriptPath, ...args], { cwd: buildPath });
-    } else if (target === "zig") {
-      await spawn("ninja", [join(buildPath, "bun-zig.o"), ...args], {
-        cwd: buildPath,
-        env: { ...process.env, ONLY_ZIG: "1" },
-      });
-    } else {
-      await spawn("ninja", args, { cwd: buildPath });
+
+    const zigTarget = getZigTarget(options);
+    await configure(zigPath, `-DZIG_TARGET=${zigTarget}`, `-DBUN_ZIG_OBJ=${zigObjectPath}`, "-DWEBKIT_DIR=omit");
+
+    await spawn("ninja", [zigObjectPath, ...args], {
+      cwd: zigPath,
+      env: {
+        ONLY_ZIG: "1",
+        ...process.env,
+      },
+    });
+
+    if (isBuildKite) {
+      await buildkiteUploadArtifact(zigObjectPath);
     }
-  } else {
-    await cmakeBuild(buildOptions);
+  }
+
+  if (!target || target === "zig") {
+    await runTask("Building old-js", () => buildBunRuntimeJs(options));
+    await runTask("Building fallback-decoder", () => buildBunFallbackDecoder(options));
+    await runTask("Building bun-error", () => buildBunError(options));
+    await runTask("Building node-fallbacks", () => buildBunNodeFallbacks(options));
+    await runTask("Building bun-zig", buildZig);
+  }
+
+  const depsPath = join(buildPath, "bun-deps");
+  const linkPath = join(buildPath, "bun");
+
+  async function linkBun() {
+    if (clean) {
+      removeFile(linkPath);
+    }
+
+    await configure(
+      linkPath,
+      "-DBUN_LINK_ONLY=1",
+      `-DBUN_CPP_ARCHIVE=${cppArchivePath}`,
+      `-DBUN_ZIG_OBJ=${zigObjectPath}`,
+      `-DBUN_DEPS_OUT_DIR=${depsPath}`,
+    );
+
+    await spawn("ninja", args, { cwd: linkPath });
   }
 
   if (!target || target === "link") {
-    const name = debug ? "bun-debug" : "bun";
+    await runTask("Building bun", linkBun);
+  }
+
+  async function prepareBun(name) {
     const exe = os === "windows" ? `${name}.exe` : name;
-    const exePath = join(buildPath, exe);
+
+    const exePath = join(linkPath, exe);
     if (!isFile(exePath)) {
-      throw new Error(`Bun executable not found: ${exePath}`);
+      throw new Error(`Bun not found: ${exePath}`);
     }
+
     chmod(exePath, 0o755);
     await spawn(exePath, ["--revision"], { env: { BUN_DEBUG_QUIET_LOGS: "1" } });
   }
-}
 
-/**
- * @param {BuildOptions} options
- */
-async function buildBunOldJs(options) {
-  await runTask("Building old-js", () => buildBunRuntimeJs(options));
-  await runTask("Building fallback-decoder", () => buildBunFallbackDecoder(options));
-  await runTask("Building bun-error", () => buildBunError(options));
-  await runTask("Building node-fallbacks", () => buildBunNodeFallbacks(options));
+  if (debug) {
+    await prepareBun("bun-debug");
+  } else {
+    await prepareBun("bun");
+    await prepareBun("bun-profile");
+  }
 }
 
 /**
@@ -1469,7 +1507,7 @@ async function cargoBuild(options) {
  */
 function isSystemEnv(name) {
   return (
-    /^(?:PATH|HOME|USER|PWD|TERM)$/i.test(name) ||
+    /^(?:PATH|HOME|USER|TERM)$/i.test(name) ||
     /^(?:TMP|TEMP|TMPDIR|TEMPDIR|RUNNER_TEMP)$/i.test(name) ||
     (isWindows && /PATHEXT|USER|SYSTEM|APPDATA|PROGRAMDATA|PROGRAMFILES|PROCESSOR|WINDIR|/i.test(name)) ||
     (isMacOS && /^HOMEBREW/i.test(name)) ||

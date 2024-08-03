@@ -237,6 +237,28 @@ export function getGitSha() {
 }
 
 /**
+ * Gets the git branch.
+ * @returns {string | undefined}
+ */
+export function getGitBranch() {
+  if (isBuildKite) {
+    return process.env["BUILDKITE_BRANCH"];
+  }
+
+  if (isGithubAction) {
+    return process.env["GITHUB_REF_NAME"];
+  }
+
+  const { exitCode, stdout } = spawnSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
+    silent: true,
+    throwOnError: false,
+  });
+  if (exitCode === 0) {
+    return stdout.trim();
+  }
+}
+
+/**
  * Gets the git repository URL.
  * @returns {string | undefined}
  */
