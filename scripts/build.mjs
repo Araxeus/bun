@@ -127,23 +127,11 @@ async function main() {
     throw new Error(`Cross-compilation is not enabled, use --cross-compile if you want to compile: ${target}`);
   }
 
-  const release = getOption({
-    name: "release",
-    description: "If the target should be built in release mode",
-    type: "boolean",
-    defaultValue: isCI && isGitMainBranch(),
-  });
-
   const debug = getOption({
     name: "debug",
     description: "If the target should be built in debug mode",
     type: "boolean",
-    defaultValue: !release,
   });
-
-  if (release && debug) {
-    throw new Error("Cannot enable both release and debug mode, use --debug-symbols for debug symbols in release");
-  }
 
   const debugSymbols = getOption({
     name: "debug-symbols",
@@ -346,7 +334,6 @@ async function main() {
     lto,
     debug,
     debugSymbols,
-    release,
     valgrind,
     assertions,
     canary,
@@ -527,8 +514,12 @@ export async function build(options, ...args) {
  * @param {BuildOptions} options
  */
 async function bunZigBuild(options) {
-  const { buildPath } = options;
+  const { buildPath, jobs } = options;
   const zigObjectPath = join(buildPath, "bun-zig.o");
+  const args = ["-j", `${jobs}`];
+  if (isVerbose) {
+    args.push("-v");
+  }
 
   await cmakeGenerateBunBuild(options, "zig");
   await spawn("ninja", [zigObjectPath, ...args], {
@@ -608,7 +599,7 @@ async function cmakeGenerateBunBuild(options, target) {
   if (target === "cpp") {
     flags.push("-DBUN_CPP_ONLY=ON");
   } else if (target === "zig") {
-    flags.push("-DBUN_ZIG_ONLY=ON", "-DNO_CODEGEN=ON", "-DWEBKIT_DIR=omit");
+    flags.push("-DBUN_ZIG_ONLY=ON", "-DWEBKIT_DIR=omit");
   } else if (target === "link") {
     flags.push("-DBUN_LINK_ONLY=ON", "-DNO_CODEGEN=ON");
   }
@@ -780,12 +771,14 @@ function getArtifacts(options) {
       name: "bun-cpp",
       aliases: ["cpp"],
       build: bunCppBuild,
+      artifacts: ["bun-cpp-objects.a"],
     },
     {
       name: "bun-zig",
       aliases: ["zig"],
       dependencies: ["bun-error", "bun-node-fallbacks", "bun-fallback-decoder", "bun-runtime-js"],
       build: bunZigBuild,
+      artifacts: ["bun-zig.o"],
     },
     {
       name: "bun-node-fallbacks",

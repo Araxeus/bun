@@ -40,12 +40,6 @@ if(NOT CMAKE_BUILD_TYPE)
     message(WARNING "No CMAKE_BUILD_TYPE value specified, defaulting to Debug.\nSet a build type with -DCMAKE_BUILD_TYPE=<Debug|Release>")
     set(CMAKE_BUILD_TYPE "Debug" CACHE STRING "Choose the type of build (Debug, Release)" FORCE)
 else()
-    if(NOT CMAKE_BUILD_TYPE MATCHES "^(Debug|Release)$")
-        message(FATAL_ERROR
-            "Invalid CMAKE_BUILD_TYPE value specified: ${CMAKE_BUILD_TYPE}\n"
-            "CMAKE_BUILD_TYPE must be Debug or Release.")
-    endif()
-
     message(STATUS "The CMake build type is: ${CMAKE_BUILD_TYPE}")
 endif()
 
@@ -63,7 +57,7 @@ if(CMAKE_BUILD_TYPE STREQUAL "Debug")
 
     # COMPILE_COMMANDS
     set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
-elseif(CMAKE_BUILD_TYPE STREQUAL "Release")
+else()
     set(DEBUG OFF)
     set(DEFAULT_ZIG_OPTIMIZE "ReleaseFast")
 
@@ -297,7 +291,7 @@ set(DEFAULT_USE_DEBUG_JSC, OFF)
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     set(DEFAULT_USE_DEBUG_JSC ON)
     set(DEFAULT_LTO OFF)
-elseif(CMAKE_BUILD_TYPE STREQUAL "Release")
+else()
     set(DEFAULT_LTO OFF)
 endif()
 
@@ -1143,7 +1137,7 @@ if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     endif()
 
     add_compile_definitions("BUN_DEBUG=1")
-elseif(CMAKE_BUILD_TYPE STREQUAL "Release")
+else()
     set(LTO_FLAG "")
 
     if(NOT WIN32)
@@ -1343,7 +1337,7 @@ if(APPLE)
 endif()
 
 # --- Stripped Binary "bun"
-if(CMAKE_BUILD_TYPE STREQUAL "Release" AND NOT WIN32 AND NOT ASSERT_ENABLED)
+if(NOT CMAKE_BUILD_TYPE STREQUAL "DEBUG" AND NOT WIN32 AND NOT ASSERT_ENABLED)
     # if(CI AND APPLE)
     if(APPLE)
         add_custom_command(
