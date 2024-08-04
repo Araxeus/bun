@@ -332,7 +332,7 @@ option(USE_STATIC_LIBATOMIC "Statically link libatomic, requires the presence of
 
 option(USE_LTO "Enable Link-Time Optimization" ${DEFAULT_LTO})
 
-if(APPLE AND USE_LTO)
+if(APPLE AND USE_LTO AND NOT BUN_ZIG_ONLY)
     set(USE_LTO OFF)
     message(FATAL_ERROR "Link-Time Optimization is not supported on macOS because it requires -fuse-ld=lld and lld causes many segfaults on macOS (likely related to stack size)")
 endif()

@@ -137,7 +137,8 @@ async function main() {
     name: "debug-symbols",
     description: "If debug symbols should be generated",
     type: "boolean",
-    defaultValue: debug || !isCI || !isGitMainBranch(),
+    defaultValue: false,
+    // defaultValue: debug || !isCI || !isGitMainBranch(),
   });
 
   const lto = getOption({
@@ -465,13 +466,6 @@ export async function build(options, ...args) {
       artifact: name.startsWith("bun") ? "bun" : name,
     };
 
-    if (clean) {
-      removeFile(buildPath);
-      for (const artifact of artifacts) {
-        removeFile(join(buildPath, artifact));
-      }
-    }
-
     /**
      * @param {string} path
      */
@@ -500,6 +494,17 @@ export async function build(options, ...args) {
     }
 
     await runTask(`Building ${name}`, async () => {
+      if (artifactsPath) {
+        await gitCloneSubmodule(artifactsPath, { force: isCI });
+      }
+
+      if (clean) {
+        removeFile(buildPath);
+        for (const artifact of artifacts) {
+          removeFile(join(buildPath, artifact));
+        }
+      }
+
       await build(buildOptions);
       await uploadArtifacts();
     });
