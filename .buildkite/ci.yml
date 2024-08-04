@@ -35,7 +35,7 @@ steps:
           os: "darwin"
           arch: "aarch64"
         command:
-          - "./scripts/build.mjs zig --target darwin-aarch64 --cross-compile"
+          - "./scripts/build.mjs zig --cross-compile"
 
       - key: "darwin-aarch64-build-cpp"
         label: ":darwin: aarch64 - build-cpp"
@@ -135,7 +135,7 @@ steps:
           os: "darwin"
           arch: "aarch64"
         command:
-          - "./scripts/build.mjs zig --target darwin-x64 --cross-compile"
+          - "./scripts/build.mjs zig --cross-compile"
 
       - key: "darwin-x64-build-cpp"
         label: ":darwin: x64 - build-cpp"
@@ -235,7 +235,7 @@ steps:
           os: "darwin"
           arch: "aarch64"
         command:
-          - "./scripts/build.mjs zig --target linux-aarch64 --cross-compile"
+          - "./scripts/build.mjs zig --cross-compile"
 
       - key: "linux-aarch64-build-cpp"
         label: ":linux: aarch64 - build-cpp"
@@ -366,7 +366,7 @@ steps:
           os: "darwin"
           arch: "aarch64"
         command:
-          - "./scripts/build.mjs zig --target linux-x64 --cross-compile"
+          - "./scripts/build.mjs zig --cross-compile"
 
       - key: "linux-x64-build-cpp"
         label: ":linux: x64 - build-cpp"
@@ -497,7 +497,7 @@ steps:
           os: "darwin"
           arch: "aarch64"
         command:
-          - "./scripts/build.mjs zig --target linux-x64-baseline --cross-compile"
+          - "./scripts/build.mjs zig --cross-compile"
 
       - key: "linux-x64-baseline-build-cpp"
         label: ":linux: x64-baseline - build-cpp"
@@ -629,10 +629,10 @@ steps:
         label: ":windows: x64 - build-zig"
         agents:
           queue: "build-darwin"
-          os: "darwin" # cross-compile on Linux or Darwin
+          os: "darwin"
           arch: "aarch64"
         command:
-          - "./scripts/build.mjs zig --target windows-x64 --cross-compile"
+          - "./scripts/build.mjs zig --cross-compile"
 
       - key: "windows-x64-build-cpp"
         label: ":windows: x64 - build-cpp"
@@ -698,10 +698,10 @@ steps:
         label: ":windows: x64-baseline - build-zig"
         agents:
           queue: "build-darwin"
-          os: "darwin" # cross-compile on Linux or Darwin
+          os: "darwin"
           arch: "aarch64"
         command:
-          - "./scripts/build.mjs zig --taget windows-x64-baseline --cross-compile"
+          - "./scripts/build.mjs zig --cross-compile"
 
       - key: "windows-x64-baseline-build-cpp"
         label: ":windows: x64-baseline - build-cpp"

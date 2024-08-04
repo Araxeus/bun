@@ -462,10 +462,10 @@ export async function build(options, ...args) {
   }
 
   const { buildPath: baseBuildPath, clean, dump } = options;
+  await runTask("Builds", () => console.log(builds.map(({ name }) => name)));
+  await runTask("Options", () => console.log(options));
+  await runTask("Environment", () => console.log(process.env));
   if (dump) {
-    await runTask("Builds", () => console.log(builds));
-    await runTask("Options", () => console.log(options));
-    await runTask("Environment", () => console.log(process.env));
     return;
   }
 
