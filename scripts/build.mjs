@@ -4,7 +4,7 @@
  * This script builds bun and its dependencies.
  */
 
-import { basename } from "node:path";
+import { basename, dirname } from "node:path";
 import {
   emitWarning,
   fatalError,
@@ -25,12 +25,9 @@ import {
   chmod,
   spawn,
   gitClone,
-  parseTarget,
   parseOs,
   parseArch,
   getCpus,
-  getGitPullRequest,
-  getBuildNumber,
   gitClean,
   gitCloneSubmodule,
   runTask,
@@ -44,9 +41,13 @@ import {
   isMacOS,
   spawnSync,
   addToPath,
-  isGitPullRequestFork,
-  getGitBranch,
   isLinux,
+  moveFile,
+  formatDuration,
+  getBuildId,
+  getBuildStep,
+  isColorTerminal,
+  isGitMainBranch,
 } from "./util.mjs";
 
 /**
@@ -57,7 +58,7 @@ import {
  * @property {"x64" | "aarch64"} arch
  * @property {boolean} [baseline]
  * @property {string} [target]
- * @property {boolean} [crossCompile]
+ * @property {boolean} [release]
  * @property {boolean} [debug]
  * @property {boolean} [lto]
  * @property {boolean} [pic]
@@ -83,64 +84,76 @@ async function main() {
 
   const customTarget = getOption({
     name: "target",
-    defaultValue: undefined,
+    description: "The target to build (e.g. bun-darwin-aarch64, bun-windows-x64-baseline)",
+    defaultValue: () => {
+      if (isCI) {
+        return getBuildStep();
+      }
+    },
   });
 
+  const machineOs = parseOs(process.platform);
   const os = getOption({
     name: "os",
     description: "The target operating system (e.g. linux, darwin, windows)",
     parse: parseOs,
-    defaultValue: customTarget || process.platform,
+    defaultValue: customTarget || machineOs,
   });
 
+  const machineArch = parseArch(process.arch);
   const arch = getOption({
     name: "arch",
     description: "The target architecture (e.g. x64, aarch64)",
     parse: parseArch,
-    defaultValue: customTarget || process.arch,
+    defaultValue: customTarget || machineArch,
+  });
+
+  const crossCompile = getOption({
+    name: "cross-compile",
+    description: "If the target is allowed to be cross-compiled (Zig only)",
+    type: "boolean",
   });
 
   const baseline = getOption({
     name: "baseline",
-    env: "USE_BASELINE_BUILD",
     description: "If the target should be built for baseline",
     type: "boolean",
     defaultValue: customTarget?.includes("-baseline"),
   });
 
-  const target = getOption({
-    name: "target",
-    description: "The target to build (e.g. bun-linux-x64)",
-    parse: parseTarget,
-    defaultValue: () => {
-      if (customTarget) {
-        return customTarget;
-      }
-      if (baseline) {
-        return `bun-${os}-${arch}-baseline`;
-      }
-      return `bun-${os}-${arch}`;
-    },
-  });
+  const target = baseline ? `bun-${os}-${arch}-baseline` : `bun-${os}-${arch}`;
 
-  const crossCompile = getOption({
-    name: "cross-compile",
-    description: "If the target can be cross-compiled (only Zig)",
+  if (!crossCompile && (machineOs !== os || machineArch !== arch)) {
+    throw new Error(`Cross-compilation is not enabled, use --cross-compile if you want to compile: ${target}`);
+  }
+
+  const release = getOption({
+    name: "release",
+    description: "If the target should be built in release mode",
     type: "boolean",
-    defaultValue: false,
+    defaultValue: isCI && isGitMainBranch(),
   });
 
   const debug = getOption({
     name: "debug",
-    env: "BUN_DEBUG",
     description: "If the target should be built in debug mode",
     type: "boolean",
-    defaultValue: false,
+    defaultValue: !release,
+  });
+
+  if (release && debug) {
+    throw new Error("Cannot enable both release and debug mode, use --debug-symbols for debug symbols in release");
+  }
+
+  const debugSymbols = getOption({
+    name: "debug-symbols",
+    description: "If debug symbols should be generated",
+    type: "boolean",
+    defaultValue: debug || !isCI || !isGitMainBranch(),
   });
 
   const lto = getOption({
     name: "lto",
-    env: "USE_LTO",
     description: "If the target should be built with link-time optimization (LTO)",
     type: "boolean",
     defaultValue: !debug && os === "linux",
@@ -148,44 +161,42 @@ async function main() {
 
   const valgrind = getOption({
     name: "valgrind",
-    env: "USE_VALGRIND",
     description: "If mimalloc should be built with valgrind",
     type: "boolean",
-    defaultValue: false,
   });
+
+  if (valgrind && os !== "linux") {
+    throw new Error(`Valgrind is not supported on target: ${os}-${arch}`);
+  }
 
   const assertions = getOption({
     name: "assertions",
-    env: "USE_DEBUG_JSC",
     description: "If debug assertions should be enabled",
     type: "boolean",
-    defaultValue: debug,
+    defaultValue: debug || !isCI || !isGitMainBranch(),
   });
 
   const canary = getOption({
     name: "canary",
-    description: "If the build is a canary build",
+    description: "If the build is a canary build, the canary revision",
     type: "number",
     defaultValue: () => {
-      if (!isGitPullRequestFork() && getGitBranch() === "main") {
-        return 1;
+      if (isCI && isGitMainBranch()) {
+        return 0;
       }
-      return 0;
+      return 1;
     },
   });
 
-  const isBuild = getOption({
-    name: "is-build",
-    description: "If the build is a non-release build (e.g. from a PR or commit)",
-    type: "boolean",
-    defaultValue: isCI ? () => !!getGitPullRequest() : undefined,
-  });
-
-  const buildNumber = getOption({
-    name: "build-number",
-    description: "The build number",
-    type: "number",
-    defaultValue: isCI ? getBuildNumber : undefined,
+  const buildId = getOption({
+    name: "build-id",
+    description: "The unique build ID (e.g. build number from CI)",
+    type: "string",
+    defaultValue: () => {
+      if (isCI) {
+        return getBuildId();
+      }
+    },
   });
 
   const clean = getOption({
@@ -198,7 +209,11 @@ async function main() {
   const osxVersion = getOption({
     name: "min-macos-version",
     description: "The minimum version of macOS to target",
-    defaultValue: (isCI && os === "darwin" && "13.0") || undefined,
+    defaultValue: () => {
+      if (isCI && os === "darwin") {
+        return "13.0";
+      }
+    },
   });
 
   const llvmVersion = getOption({
@@ -209,7 +224,7 @@ async function main() {
 
   const skipLlvmVersion = getOption({
     name: "skip-llvm-version",
-    description: "If the LLVM version should be ignored (skip checks for LLVM version of CC, CXX, AR, etc)",
+    description: "If the LLVM version should be ignored (do not check LLVM version of CC, CXX, AR, etc)",
     type: "boolean",
   });
 
@@ -254,7 +269,7 @@ async function main() {
     command: "llvm-ranlib",
     aliases: [`llvm-ranlib-${llvmVersion}`],
     exactVersion: exactLlvmVersion,
-    throwIfNotFound: !skipLlvmVersion && os !== "windows",
+    throwIfNotFound: os !== "windows" && !skipLlvmVersion,
   });
 
   const ccache = getCommand({
@@ -275,24 +290,29 @@ async function main() {
   const cwd = getOption({
     name: "cwd",
     description: "The current working directory",
-    defaultValue: () => process.cwd(),
+    parse: resolve,
+    defaultValue: process.cwd(),
   });
 
   const buildPath = getOption({
-    name: "build",
+    name: "build-path",
     description: "The build directory",
-    defaultValue: () => resolve(cwd, "build", debug ? "debug" : "release", target),
+    parse: resolve,
+    defaultValue: join(cwd, "build", debug ? "debug" : "release", target),
   });
 
   const cachePath = getOption({
     name: "cache-path",
     description: "The path to use for build caching",
+    parse: resolve,
     defaultValue: () => {
-      const homePath = process.env["HOME"];
-      if (isCI && homePath) {
-        return resolve(homePath, ".cache", debug ? "debug" : "release", target);
+      if (isCI) {
+        const homePath = process.env["HOME"];
+        if (homePath) {
+          return join(homePath, ".cache", debug ? "debug" : "release", target);
+        }
       }
-      return resolve(cwd, ".cache");
+      return join(cwd, ".cache");
     },
   });
 
@@ -308,6 +328,13 @@ async function main() {
     defaultValue: noCache ? "none" : "read-write",
   });
 
+  const dump = getOption({
+    name: "dump",
+    aliases: ["print"],
+    description: "Dump the build options and exit",
+    type: "boolean",
+  });
+
   /**
    * @type {BuildOptions}
    */
@@ -316,14 +343,14 @@ async function main() {
     arch,
     baseline,
     target,
-    crossCompile,
     lto,
     debug,
+    debugSymbols,
+    release,
     valgrind,
     assertions,
     canary,
-    isBuild,
-    buildNumber,
+    buildId,
     osxVersion,
     llvmVersion,
     cc,
@@ -337,6 +364,7 @@ async function main() {
     buildPath,
     cachePath,
     cacheStrategy,
+    dump,
   };
 
   const inheritEnv = getOption({
@@ -379,41 +407,116 @@ async function main() {
   process.env["FORCE_COLOR"] = noColor ? "0" : "1";
 
   const args = process.argv.slice(2).filter(arg => !arg.startsWith("-"));
-
-  const printAndExit = getOption({
-    name: "print",
-    description: "Print the options and exit",
-    type: "boolean",
-  });
-
-  if (printAndExit || isCI) {
-    await runTask("Options", () => console.log(options));
-    await runTask("Environment", () => console.log(process.env));
-    if (printAndExit) {
-      process.exit(0);
-    }
-  }
-
-  if (args.length) {
-    for (const arg of args) {
-      await build(arg, options);
-    }
-  } else {
-    await build("bun", options);
-  }
+  await build(options, ...args);
 }
 
 /**
- * Runs a build.
- * @param {string} name
  * @param {BuildOptions} options
+ * @param  {...string} args
  */
-export async function build(name, options = {}) {
-  if (!name.startsWith("bun")) {
-    return buildDependency(name, options);
+export async function build(options, ...args) {
+  const artifacts = getArtifacts(options);
+  /**
+   * @type {Artifact[]}
+   */
+  const builds = [];
+
+  /**
+   * @param {string} query
+   */
+  function addBuild(query) {
+    const matches = artifacts.filter(({ name, aliases }) => name === query || aliases?.includes(query));
+    if (!matches.length) {
+      throw new Error(`Unknown artifact: ${query}`);
+    }
+
+    for (const artifact of matches) {
+      const { dependencies } = artifact;
+
+      if (builds.some(({ name }) => name === artifact.name)) {
+        return;
+      }
+
+      dependencies?.forEach(dependency => addBuild(dependency));
+      builds.push(artifact);
+    }
   }
-  const [_, target] = name.split("-");
-  return buildBun(options, target);
+
+  for (const arg of args) {
+    const buildCount = builds.length;
+
+    for (const artifact of artifacts) {
+      const { name, aliases } = artifact;
+      if (arg === name || aliases?.includes(arg)) {
+        addBuild(name);
+      }
+    }
+
+    if (builds.length === buildCount) {
+      throw new Error(`Unknown artifact: ${arg}`);
+    }
+  }
+
+  if (!builds.length) {
+    addBuild("bun");
+  }
+
+  const { buildPath: baseBuildPath, clean, dump } = options;
+  if (dump) {
+    await runTask("Builds", () => console.log(builds));
+    await runTask("Options", () => console.log(options));
+    await runTask("Environment", () => console.log(process.env));
+    return;
+  }
+
+  for (const { name, cwd, build, artifacts = [], artifactsPath } of builds) {
+    const buildPath = join(baseBuildPath, name);
+    const buildOptions = {
+      ...options,
+      cwd: cwd || options.cwd,
+      buildPath,
+      artifact: name.startsWith("bun") ? "bun" : name,
+    };
+
+    if (clean) {
+      removeFile(buildPath);
+      for (const artifact of artifacts) {
+        removeFile(join(buildPath, artifact));
+      }
+    }
+
+    /**
+     * @param {string} path
+     */
+    async function uploadArtifact(path) {
+      const artifactPath = join(buildPath, path);
+      if (!isFile(artifactPath)) {
+        throw new Error(`No artifact found: ${path}`);
+      }
+
+      if (artifactsPath) {
+        copyFile(artifactPath, join(artifactsPath, basename(path)));
+      }
+
+      if (isBuildKite) {
+        await buildkiteUploadArtifact(artifactPath);
+      }
+    }
+
+    async function uploadArtifacts() {
+      await Promise.all(artifacts.map(uploadArtifact));
+    }
+
+    if (artifacts.length && artifacts.every(name => isFile(join(buildPath, name)))) {
+      await runTask(`Cached ${name}`, uploadArtifacts);
+      continue;
+    }
+
+    await runTask(`Building ${name}`, async () => {
+      await build(buildOptions);
+      await uploadArtifacts();
+    });
+  }
 }
 
 /**
@@ -422,163 +525,128 @@ export async function build(name, options = {}) {
 
 /**
  * @param {BuildOptions} options
- * @param {"deps" | "cpp" | "zig" | "link" | undefined} target
  */
-async function buildBun(options, target) {
-  const { os, buildPath, jobs, clean } = options;
-  const { debug, baseline, lto, valgrind, assertions, canary, buildNumber } = options;
+async function bunZigBuild(options) {
+  const { buildPath } = options;
+  const zigObjectPath = join(buildPath, "bun-zig.o");
 
-  if (clean && !target) {
-    removeFile(buildPath);
-  }
-
-  if (!target || target === "deps") {
-    await buildDependencies(options);
-    if (target === "deps") {
-      return;
-    }
-  }
-
-  /**
-   * @param {string} buildPath
-   * @param {...string} extraArgs
-   */
-  async function configure(buildPath, ...extraArgs) {
-    const args = [
-      "-DNO_CONFIGURE_DEPENDS=ON",
-      buildNumber && `-DBUILD_NUMBER=${buildNumber}`,
-      canary && `-DCANARY=${canary}`,
-      baseline && "-DUSE_BASELINE_BUILD=ON",
-      lto && "-DUSE_LTO=ON",
-      assertions && "-DUSE_DEBUG_JSC=ON",
-      valgrind && "-DUSE_VALGRIND=ON",
-      ...extraArgs,
-    ];
-
-    await cmakeGenerateBuild(
-      {
-        ...options,
-        artifact: "bun",
-        buildPath,
-      },
-      ...args.filter(Boolean),
-    );
-  }
-
-  const args = ["-j", `${jobs}`];
-  if (isVerbose) {
-    args.push("-v");
-  }
-
-  const cppPath = join(buildPath, "bun-cpp");
-  const cppArchivePath = join(cppPath, "bun-cpp-objects.a");
-
-  async function buildCpp() {
-    const isWindows = os === "windows";
-    const scriptPath = isWindows ? "compile-cpp-only.ps1" : "compile-cpp-only.sh";
-    const shell = getCommand({
-      name: "shell",
-      command: isWindows ? "pwsh" : "bash",
-      aliases: isWindows ? ["powershell"] : ["sh"],
-    });
-
-    if (clean) {
-      removeFile(cppPath);
-    }
-
-    await configure(cppPath, "-DBUN_CPP_ONLY=ON");
-    await spawn(shell, [scriptPath, ...args], { cwd: cppPath });
-
-    if (isBuildKite) {
-      await buildkiteUploadArtifact(cppArchivePath);
-    }
-  }
-
-  if (!target || target === "cpp") {
-    await runTask("Building bun-cpp", buildCpp);
-  }
-
-  const zigPath = join(buildPath, "bun-zig");
-  const zigObjectPath = join(zigPath, "bun-zig.o");
-
-  async function buildZig() {
-    if (clean) {
-      removeFile(zigPath);
-    }
-
-    const zigTarget = getZigTarget(options);
-    await configure(zigPath, `-DZIG_TARGET=${zigTarget}`, `-DBUN_ZIG_OBJ=${zigObjectPath}`, "-DWEBKIT_DIR=omit");
-
-    await spawn("ninja", [zigObjectPath, ...args], {
-      cwd: zigPath,
-      env: {
-        ONLY_ZIG: "1",
-        ...process.env,
-      },
-    });
-
-    if (isBuildKite) {
-      await buildkiteUploadArtifact(zigObjectPath);
-    }
-  }
-
-  if (!target || target === "zig") {
-    await runTask("Building old-js", () => buildBunRuntimeJs(options));
-    await runTask("Building fallback-decoder", () => buildBunFallbackDecoder(options));
-    await runTask("Building bun-error", () => buildBunError(options));
-    await runTask("Building node-fallbacks", () => buildBunNodeFallbacks(options));
-    await runTask("Building bun-zig", buildZig);
-  }
-
-  const depsPath = join(buildPath, "bun-deps");
-  const linkPath = join(buildPath, "bun");
-
-  async function linkBun() {
-    if (clean) {
-      removeFile(linkPath);
-    }
-
-    await configure(
-      linkPath,
-      "-DBUN_LINK_ONLY=1",
-      `-DBUN_CPP_ARCHIVE=${cppArchivePath}`,
-      `-DBUN_ZIG_OBJ=${zigObjectPath}`,
-      `-DBUN_DEPS_OUT_DIR=${depsPath}`,
-    );
-
-    await spawn("ninja", args, { cwd: linkPath });
-  }
-
-  if (target && target !== "link") {
-    return;
-  }
-
-  await runTask("Building bun", linkBun);
-
-  async function prepareBun(name) {
-    const exe = os === "windows" ? `${name}.exe` : name;
-
-    const exePath = join(linkPath, exe);
-    if (!isFile(exePath)) {
-      throw new Error(`Bun not found: ${exePath}`);
-    }
-
-    chmod(exePath, 0o755);
-    await spawn(exePath, ["--revision"], { env: { BUN_DEBUG_QUIET_LOGS: "1" } });
-  }
-
-  if (debug) {
-    await prepareBun("bun-debug");
-  } else {
-    await prepareBun("bun");
-    await prepareBun("bun-profile");
-  }
+  await cmakeGenerateBunBuild(options, "zig");
+  await spawn("ninja", [zigObjectPath, ...args], {
+    cwd: buildPath,
+    env: {
+      ONLY_ZIG: "1",
+      ...process.env,
+    },
+  });
 }
 
 /**
  * @param {BuildOptions} options
  */
-async function buildBunRuntimeJs(options) {
+async function bunCppBuild(options) {
+  const { buildPath, os, jobs } = options;
+
+  const shell = os === "windows" ? "pwsh" : "bash";
+  const scriptPath = os === "windows" ? "compile-cpp-only.ps1" : "compile-cpp-only.sh";
+  const args = ["-j", `${jobs}`];
+  if (isVerbose) {
+    args.push("-v");
+  }
+
+  await cmakeGenerateBunBuild(options, "cpp");
+  await spawn(shell, [scriptPath, ...args], { cwd: buildPath });
+}
+
+/**
+ * @param {BuildOptions} options
+ */
+async function bunLinkBuild(options) {
+  const { buildPath, jobs } = options;
+  const args = ["-j", `${jobs}`];
+  if (isVerbose) {
+    args.push("-v");
+  }
+
+  await cmakeGenerateBunBuild(options, "link");
+  await spawn("ninja", args, { cwd: buildPath });
+}
+
+/**
+ * @param {BuildOptions} options
+ */
+async function bunBuild(options) {
+  const { buildPath, jobs } = options;
+  const args = ["-j", `${jobs}`];
+  if (isVerbose) {
+    args.push("-v");
+  }
+
+  await cmakeGenerateBunBuild(options);
+  await spawn("ninja", args, { cwd: buildPath });
+}
+
+/**
+ * @param {BuildOptions} options
+ * @param {"cpp" | "zig" | "link" | undefined} target
+ */
+async function cmakeGenerateBunBuild(options, target) {
+  const { buildPath, buildId, canary, baseline, lto, assertions, valgrind } = options;
+  const baseBuildPath = dirname(buildPath);
+
+  const cpuTarget = getCpuTarget(options);
+  const flags = [
+    "-DNO_CONFIGURE_DEPENDS=ON",
+    `-DCPU_TARGET=${cpuTarget}`,
+    buildId && `-DBUILD_ID=${buildId}`,
+    canary && `-DCANARY=${canary}`,
+    baseline && "-DUSE_BASELINE_BUILD=ON",
+    lto && "-DUSE_LTO=ON",
+    assertions && "-DUSE_DEBUG_JSC=ON",
+    valgrind && "-DUSE_VALGRIND=ON",
+  ];
+
+  if (target === "cpp") {
+    flags.push("-DBUN_CPP_ONLY=ON");
+  } else if (target === "zig") {
+    flags.push("-DBUN_ZIG_ONLY=ON", "-DNO_CODEGEN=ON", "-DWEBKIT_DIR=omit");
+  } else if (target === "link") {
+    flags.push("-DBUN_LINK_ONLY=ON", "-DNO_CODEGEN=ON");
+  }
+
+  if (!target || target === "zig") {
+    const zigTarget = getZigTarget(options);
+    const zigOptimize = getZigOptimize(options);
+
+    flags.push(`-DZIG_TARGET=${zigTarget}`, `-DZIG_OPTIMIZE=${zigOptimize}`);
+  }
+
+  if (target === "link" || target === "zig") {
+    const zigPath = join(baseBuildPath, "bun-zig");
+    const zigObjectPath = join(zigPath, "bun-zig.o");
+
+    flags.push(`-DBUN_ZIG_OBJ=${zigObjectPath}`);
+  }
+
+  const cppPath = join(baseBuildPath, "bun-cpp");
+  const cppArchivePath = join(cppPath, "bun-cpp-objects.a");
+
+  if (target === "link") {
+    flags.push(`-DBUN_CPP_ARCHIVE=${cppArchivePath}`);
+  }
+
+  const depsPath = join(baseBuildPath, "bun-deps");
+
+  if (!target || target === "link") {
+    flags.push(`-DBUN_DEPS_OUT_DIR=${depsPath}`);
+  }
+
+  await cmakeGenerateBuild(options, ...flags.filter(Boolean));
+}
+
+/**
+ * @param {BuildOptions} options
+ */
+async function bunRuntimeJsBuild(options) {
   const { cwd, clean } = options;
   const srcPath = join(cwd, "src", "runtime.bun.js");
   const outPath = join(cwd, "src", "runtime.out.js");
@@ -605,7 +673,7 @@ async function buildBunRuntimeJs(options) {
 /**
  * @param {BuildOptions} options
  */
-async function buildBunFallbackDecoder(options) {
+async function bunFallbackDecoderBuild(options) {
   const { cwd, clean } = options;
   const srcPath = join(cwd, "src", "fallback.ts");
   const outPath = join(cwd, "src", "fallback.out.js");
@@ -632,9 +700,8 @@ async function buildBunFallbackDecoder(options) {
 /**
  * @param {BuildOptions} options
  */
-async function buildBunError(options) {
-  const { cwd: pwd, clean } = options;
-  const cwd = join(pwd, "packages", "bun-error");
+async function bunErrorBuild(options) {
+  const { cwd, clean } = options;
   const outPath = join(cwd, "dist");
 
   if (clean || !isDirectory(outPath)) {
@@ -660,9 +727,8 @@ async function buildBunError(options) {
 /**
  * @param {BuildOptions} options
  */
-async function buildBunNodeFallbacks(options) {
-  const { cwd: pwd, clean } = options;
-  const cwd = join(pwd, "src", "node-fallbacks");
+async function bunNodeFallbacksBuild(options) {
+  const { cwd, clean } = options;
   const outPath = join(cwd, "out");
 
   if (clean || !isDirectory(outPath)) {
@@ -680,175 +746,228 @@ async function buildBunNodeFallbacks(options) {
  * Build dependencies.
  */
 
-const dependencies = {
-  "boringssl": buildBoringSsl,
-  "c-ares": buildCares,
-  "libarchive": buildLibarchive,
-  "libdeflate": buildLibdeflate,
-  "libuv": buildLibuv,
-  "lol-html": buildLolhtml,
-  "ls-hpack": buildLshpack,
-  "mimalloc": buildMimalloc,
-  "tinycc": buildTinycc,
-  "zlib": buildZlib,
-  "zstd": buildZstd,
-};
-
 /**
- * Builds all dependencies.
- * @param {BuildOptions} options
+ * @typedef {Object} Artifact
+ * @property {string} name
+ * @property {string[]} [aliases]
+ * @property {string} [cwd]
+ * @property {string[]} [artifacts]
+ * @property {Function} build
+ * @property {string[]} [dependencies]
  */
-async function buildDependencies(options) {
-  const { os, clean, buildPath } = options;
-
-  if (clean) {
-    const depOutPath = join(buildPath, "bun-deps");
-    removeFile(depOutPath);
-  }
-
-  for (const name of Object.keys(dependencies)) {
-    if (name === "libuv" && os !== "windows") {
-      continue;
-    }
-    await buildDependency(name, options);
-  }
-}
-
-/**
- * Builds a dependency.
- * @param {keyof typeof dependencies} name
- * @param {BuildOptions} options
- */
-async function buildDependency(name, options = {}) {
-  const dependency = dependencies[name];
-  if (!dependency) {
-    throw new Error(`Unknown dependency: ${name}`);
-  }
-
-  const { cwd, buildPath, clean } = options;
-  const depPath = join(cwd, "src", "deps", name);
-  const depBuildPath = join(buildPath, name);
-  const depOutPath = join(buildPath, "bun-deps");
-  const depOptions = {
-    ...options,
-    artifact: name,
-    cwd: depPath,
-    buildPath: depBuildPath,
-    // TODO: Dependencies have historically been built in release mode.
-    // We should change this, but there are various issues with linking.
-    debug: false,
-  };
-
-  async function build() {
-    if (clean) {
-      await gitClean(depPath);
-      removeFile(depBuildPath);
-    }
-    await gitCloneSubmodule(depPath, { cwd, force: clean, recursive: true });
-    const artifacts = await dependency(depOptions);
-    await Promise.all(artifacts.map(upload));
-  }
-
-  /**
-   * @param {string} artifact
-   */
-  async function upload(artifact) {
-    let path;
-    if (isFile(artifact)) {
-      path = artifact;
-    } else if (isFile(join(depBuildPath, artifact))) {
-      path = join(depBuildPath, artifact);
-    } else {
-      path = join(depBuildPath, artifact);
-    }
-
-    if (!isFile(path)) {
-      throw new Error(`Artifact not found: ${path}`);
-    }
-
-    if (isBuildKite) {
-      await buildkiteUploadArtifact(path);
-    } else {
-      copyFile(path, join(depOutPath, basename(path)));
-    }
-  }
-
-  await runTask(`Building ${name}`, build);
-}
 
 /**
  * @param {BuildOptions} options
- * @returns {Promise<string[]>}
+ * @returns {Artifact[]}
  */
-async function buildBoringSsl(options) {
-  const { os } = options;
+function getArtifacts(options) {
+  const { os, cwd, buildPath } = options;
+  const depsPath = join(cwd, "src", "deps");
+  const depsOutPath = join(buildPath, "bun-deps");
 
-  let artifacts;
+  const artifacts = [
+    {
+      name: "bun",
+      dependencies: ["bun-deps"],
+      build: bunBuild,
+    },
+    {
+      name: "bun-link",
+      aliases: ["link"],
+      build: bunLinkBuild,
+    },
+    {
+      name: "bun-cpp",
+      aliases: ["cpp"],
+      build: bunCppBuild,
+    },
+    {
+      name: "bun-zig",
+      aliases: ["zig"],
+      dependencies: ["bun-error", "bun-node-fallbacks", "bun-fallback-decoder", "bun-runtime-js"],
+      build: bunZigBuild,
+    },
+    {
+      name: "bun-node-fallbacks",
+      aliases: ["node-fallbacks", "bun-old-js", "old-js"],
+      cwd: join(cwd, "src", "node-fallbacks"),
+      build: bunNodeFallbacksBuild,
+    },
+    {
+      name: "bun-error",
+      aliases: ["bun-old-js", "old-js"],
+      cwd: join(cwd, "packages", "bun-error"),
+      build: bunErrorBuild,
+    },
+    {
+      name: "bun-fallback-decoder",
+      aliases: ["fallback-decoder", "bun-old-js", "old-js"],
+      build: bunFallbackDecoderBuild,
+    },
+    {
+      name: "bun-runtime-js",
+      aliases: ["runtime-js", "bun-old-js", "old-js"],
+      build: bunRuntimeJsBuild,
+    },
+    {
+      name: "boringssl",
+      aliases: ["bun-deps", "deps"],
+      cwd: join(depsPath, "boringssl"),
+      artifacts: boringSslArtifacts(options),
+      artifactsPath: depsOutPath,
+      build: boringSslBuild,
+    },
+    {
+      name: "cares",
+      aliases: ["c-ares", "bun-deps", "deps"],
+      cwd: join(depsPath, "c-ares"),
+      artifacts: caresArtifacts(options),
+      artifactsPath: depsOutPath,
+      build: caresBuild,
+    },
+    {
+      name: "libarchive",
+      aliases: ["bun-deps", "deps"],
+      cwd: join(depsPath, "libarchive"),
+      artifacts: libarchiveArtifacts(options),
+      artifactsPath: depsOutPath,
+      build: libarchiveBuild,
+    },
+    {
+      name: "libdeflate",
+      aliases: ["bun-deps", "deps"],
+      cwd: join(depsPath, "libdeflate"),
+      artifacts: libdeflateArtifacts(options),
+      artifactsPath: depsOutPath,
+      build: libdeflateBuild,
+    },
+    {
+      name: "lolhtml",
+      aliases: ["lol-html", "bun-deps", "deps"],
+      cwd: join(depsPath, "lol-html"),
+      artifacts: lolhtmlArtifacts(options),
+      artifactsPath: depsOutPath,
+      build: lolhtmlBuild,
+    },
+    {
+      name: "lshpack",
+      aliases: ["ls-hpack", "bun-deps", "deps"],
+      cwd: join(depsPath, "ls-hpack"),
+      artifacts: lshpackArtifacts(options),
+      artifactsPath: depsOutPath,
+      build: lshpackBuild,
+    },
+    {
+      name: "mimalloc",
+      aliases: ["bun-deps", "deps"],
+      cwd: join(depsPath, "mimalloc"),
+      artifacts: mimallocArtifacts(options),
+      artifactsPath: depsOutPath,
+      build: mimallocBuild,
+    },
+    {
+      name: "tinycc",
+      aliases: ["bun-deps", "deps"],
+      cwd: join(depsPath, "tinycc"),
+      artifacts: tinyccArtifacts(options),
+      artifactsPath: depsOutPath,
+      build: tinyccBuild,
+    },
+    {
+      name: "zlib",
+      aliases: ["bun-deps", "deps"],
+      cwd: join(depsPath, "zlib"),
+      artifacts: zlibArtifacts(options),
+      artifactsPath: depsOutPath,
+      build: zlibBuild,
+    },
+    {
+      name: "zstd",
+      aliases: ["bun-deps", "deps"],
+      cwd: join(depsPath, "zstd"),
+      artifacts: zstdArtifacts(options),
+      artifactsPath: depsOutPath,
+      build: zstdBuild,
+    },
+  ];
+
   if (os === "windows") {
-    artifacts = ["crypto.lib", "ssl.lib", "decrepit.lib"];
-  } else {
-    artifacts = ["libcrypto.a", "libssl.a", "libdecrepit.a"];
+    artifacts.push({
+      name: "libuv",
+      aliases: ["bun-deps"],
+      cwd: join(depsPath, "libuv"),
+      artifacts: libuvArtifacts(options),
+      artifactsPath: depsOutPath,
+      build: libuvBuild,
+    });
   }
-
-  if (isCached(options, artifacts)) {
-    return artifacts;
-  }
-
-  await cmakeGenerateBuild(options);
-  await cmakeBuild(options, ...artifacts);
 
   return artifacts;
 }
 
 /**
  * @param {BuildOptions} options
- * @returns {Promise<string[]>}
+ * @returns {string[]}
  */
-async function buildCares(options) {
+function boringSslArtifacts(options) {
   const { os } = options;
-
-  let artifacts;
   if (os === "windows") {
-    artifacts = ["cares.lib"];
-  } else {
-    artifacts = ["libcares.a"];
+    return ["crypto.lib", "ssl.lib", "decrepit.lib"];
   }
+  return ["libcrypto.a", "libssl.a", "libdecrepit.a"];
+}
 
-  const artifactPaths = artifacts.map(artifact => join("lib", artifact));
-  if (isCached(options, artifactPaths)) {
-    return artifactPaths;
+/**
+ * @param {BuildOptions} options
+ */
+async function boringSslBuild(options) {
+  await cmakeGenerateBuild(options);
+  await cmakeBuild(options, ...boringSslArtifacts(options));
+}
+
+/**
+ * @param {BuildOptions} options
+ * @returns {string[]}
+ */
+function caresArtifacts(options) {
+  const libPath = "lib";
+  const { os } = options;
+  if (os === "windows") {
+    return [join(libPath, "cares.lib")];
   }
+  return [join(libPath, "libcares.a")];
+}
 
+/**
+ * @param {BuildOptions} options
+ */
+async function caresBuild(options) {
   await cmakeGenerateBuild(
     { ...options, pic: true },
     "-DCARES_STATIC=ON",
     "-DCARES_STATIC_PIC=ON",
     "-DCARES_SHARED=OFF",
   );
-  await cmakeBuild(options, ...artifacts);
-
-  return artifactPaths;
+  await cmakeBuild(options, ...caresArtifacts(options));
 }
 
 /**
  * @param {BuildOptions} options
- * @returns {Promise<string[]>}
+ * @returns {string[]}
  */
-async function buildLibarchive(options) {
+function libarchiveArtifacts(options) {
   const { os } = options;
-
-  let artifacts;
+  const libPath = "libarchive";
   if (os === "windows") {
-    artifacts = ["archive.lib"];
-  } else {
-    artifacts = ["libarchive.a"];
+    return [join(libPath, "archive.lib")];
   }
+  return [join(libPath, "libarchive.a")];
+}
 
-  const artifactPaths = artifacts.map(artifact => join("libarchive", artifact));
-  if (isCached(options, artifactPaths)) {
-    return artifactPaths;
-  }
-
+/**
+ * @param {BuildOptions} options
+ */
+async function libarchiveBuild(options) {
   await cmakeGenerateBuild(
     { ...options, pic: true },
     "-DBUILD_SHARED_LIBS=0",
@@ -874,133 +993,121 @@ async function buildLibarchive(options) {
     "-DENABLE_ZSTD=0",
   );
   await cmakeBuild(options, "archive_static");
-
-  return artifactPaths;
 }
 
 /**
  * @param {BuildOptions} options
- * @returns {Promise<string[]>}
+ * @returns {string[]}
  */
-async function buildLibdeflate(options) {
+function libdeflateArtifacts(options) {
   const { os } = options;
-
-  let artifacts;
   if (os === "windows") {
-    artifacts = ["deflatestatic.lib"];
-  } else {
-    artifacts = ["libdeflate.a"];
+    return ["deflatestatic.lib"];
   }
+  return ["libdeflate.a"];
+}
 
-  if (isCached(options, artifacts)) {
-    return artifacts;
-  }
-
+/**
+ * @param {BuildOptions} options
+ */
+async function libdeflateBuild(options) {
   await cmakeGenerateBuild(
     options,
     "-DLIBDEFLATE_BUILD_STATIC_LIB=ON",
     "-DLIBDEFLATE_BUILD_SHARED_LIB=OFF",
     "-DLIBDEFLATE_BUILD_GZIP=OFF",
   );
-  await cmakeBuild(options, ...artifacts);
-
-  return artifacts;
+  await cmakeBuild(options, ...libdeflateArtifacts(options));
 }
 
 /**
  * @param {BuildOptions} options
- * @returns {Promise<string[]>}
+ * @returns {string[]}
  */
-async function buildLibuv(options) {
-  const { cwd } = options;
-
-  const artifacts = ["libuv.lib"];
-  if (isCached(options, artifacts)) {
-    return artifacts;
+function libuvArtifacts(options) {
+  const { os } = options;
+  if (os === "windows") {
+    return ["libuv.lib"];
   }
+  return [];
+}
 
+/**
+ * @param {BuildOptions} options
+ */
+async function libuvBuild(options) {
+  const { cwd } = options;
   await gitClone({
     cwd,
     url: "https://github.com/libuv/libuv",
     commit: "da527d8d2a908b824def74382761566371439003",
   });
-
   await cmakeGenerateBuild(options, "-DCMAKE_C_FLAGS=/DWIN32 /D_WINDOWS -Wno-int-conversion");
   await cmakeBuild(options);
-
-  return artifacts;
 }
 
 /**
  * @param {BuildOptions} options
- * @returns {Promise<string[]>}
+ * @returns {string[]}
  */
-async function buildLolhtml(options) {
-  const { os, cwd, debug } = options;
-
-  let artifacts;
-  if (os === "windows") {
-    artifacts = ["lolhtml.lib", "lolhtml.pdb"];
-  } else {
-    artifacts = ["liblolhtml.a"];
-  }
-
+function lolhtmlArtifacts(options) {
   const target = getRustTarget(options);
+  const { os, debug } = options;
   const targetPath = join(target, debug ? "debug" : "release");
-  const artifactPaths = artifacts.map(artifact => join(targetPath, artifact));
-  if (isCached(options, artifactPaths)) {
-    return artifactPaths;
+  if (os === "windows") {
+    return [join(targetPath, "lolhtml.lib"), join(targetPath, "lolhtml.pdb")];
   }
-
-  const capiPath = join(cwd, "c-api");
-  await cargoBuild({ ...options, cwd: capiPath });
-
-  return artifactPaths;
+  return [join(targetPath, "liblolhtml.a")];
 }
 
 /**
  * @param {BuildOptions} options
- * @returns {Promise<string[]>}
  */
-async function buildLshpack(options) {
+async function lolhtmlBuild(options) {
+  const { cwd } = options;
+  const srcPath = join(cwd, "c-api");
+  await cargoBuild({ ...options, cwd: srcPath });
+}
+
+/**
+ * @param {BuildOptions} options
+ * @returns {string[]}
+ */
+function lshpackArtifacts(options) {
   const { os } = options;
-
-  let artifacts;
   if (os === "windows") {
-    artifacts = ["ls-hpack.lib"];
-  } else {
-    artifacts = ["libls-hpack.a"];
+    return ["ls-hpack.lib"];
   }
-
-  if (isCached(options, artifacts)) {
-    return artifacts;
-  }
-
-  await cmakeGenerateBuild(options, "-DLSHPACK_XXH=ON", "-DSHARED=0");
-  await cmakeBuild(options, ...artifacts);
-
-  return artifacts;
+  return ["libls-hpack.a"];
 }
 
 /**
  * @param {BuildOptions} options
- * @returns {Promise<string[]>}
  */
-async function buildMimalloc(options) {
-  const { os, debug, valgrind, buildPath } = options;
+async function lshpackBuild(options) {
+  // FIXME: There is a linking issue with lshpack built in debug mode or debug symbols
+  await cmakeGenerateBuild({ ...options, debug: false, debugSymbols: false }, "-DLSHPACK_XXH=ON", "-DSHARED=0");
+  await cmakeBuild(options, ...lshpackArtifacts(options));
+}
+
+/**
+ * @param {BuildOptions} options
+ * @returns {string[]}
+ */
+function mimallocArtifacts(options) {
+  const { os, debug } = options;
   const name = debug ? "libmimalloc-debug" : "libmimalloc";
-
-  let artifacts;
   if (os === "windows") {
-    artifacts = ["mimalloc-static.lib"];
-  } else {
-    artifacts = [`${name}.a`, `${name}.o`];
+    return [`${name}.lib`];
   }
+  return [`${name}.a`, `${name}.o`];
+}
 
-  if (isCached(options, artifacts)) {
-    return artifacts;
-  }
-
+/**
+ * @param {BuildOptions} options
+ */
+async function mimallocBuild(options) {
+  const { os, debug, valgrind, buildPath } = options;
   const flags = [
     "-DMI_SKIP_COLLECT_ON_EXIT=1",
     "-DMI_BUILD_SHARED=OFF",
@@ -1021,32 +1128,30 @@ async function buildMimalloc(options) {
   }
   await cmakeGenerateBuild(options, ...flags);
   await cmakeBuild(options);
-
   if (os !== "windows") {
     const objectPath = join(buildPath, "CMakeFiles", "mimalloc-obj.dir", "src", "static.c.o");
+    const name = debug ? "libmimalloc-debug" : "libmimalloc";
     copyFile(objectPath, join(buildPath, `${name}.o`));
   }
-
-  return artifacts;
 }
 
 /**
  * @param {BuildOptions} options
- * @returns {Promise<string[]>}
+ * @returns {string[]}
  */
-async function buildTinycc(options) {
-  const { os, cwd, buildPath, cc, ccache, ar, debug, clean, jobs } = options;
-
-  let artifacts;
+function tinyccArtifacts(options) {
+  const { os } = options;
   if (os === "windows") {
-    artifacts = ["tcc.lib"];
-  } else {
-    artifacts = ["libtcc.a"];
+    return ["tcc.lib"];
   }
+  return ["libtcc.a"];
+}
 
-  if (isCached(options, artifacts)) {
-    return artifacts;
-  }
+/**
+ * @param {BuildOptions} options
+ */
+async function tinyccBuild(options) {
+  const { os, cwd, buildPath, cc, ccache, ar, debug, clean, jobs } = options;
 
   // tinycc doesn't support out-of-source builds, so we need to copy the source
   // directory to the build directory.
@@ -1059,7 +1164,36 @@ async function buildTinycc(options) {
   const ldflags = getLdFlags(options);
   const ccOrCcache = ccache ? `${ccache} ${cc}` : cc;
 
-  if (os === "windows") {
+  async function posixBuild() {
+    const args = [
+      "--config-predefs=yes",
+      "--enable-static",
+      `--cc=${ccOrCcache}`,
+      `--extra-cflags=${cflags.join(" ")}`,
+      `--ar=${ar}`,
+      `--extra-ldflags=${ldflags.join(" ")}`,
+    ];
+    if (debug) {
+      args.push("--debug");
+    }
+    await spawn("./configure", args, { cwd: buildPath });
+
+    // There is a bug in configure that causes it to use the wrong compiler.
+    // We need to patch the config.mak file to use the correct compiler.
+    const configPath = join(buildPath, "config.mak");
+    if (!isFile(configPath)) {
+      throw new Error("Could not find file: config.mak");
+    }
+    const configText = readFile(configPath, "utf-8");
+    if (!configText.includes(ccOrCcache)) {
+      writeFile(configPath, configText.replace(/CC=[^\n]+/g, `CC=${ccOrCcache}`));
+      print("Patched config.mak");
+    }
+
+    await spawn("make", ["libtcc.a", "-j", `${jobs}`], { cwd: buildPath });
+  }
+
+  async function windowsBuild() {
     const version = readFile(join(cwd, "VERSION"), "utf-8");
     const { stdout: revision } = spawnSync("git", ["rev-parse", "HEAD"], { cwd });
     const configText = `#define TCC_VERSION "${version.trim()}"
@@ -1099,55 +1233,32 @@ async function buildTinycc(options) {
       { cwd: buildPath },
     );
     await spawn(ar, ["tcc.obj", "-OUT:tcc.lib"], { cwd: buildPath });
-  } else {
-    const args = [
-      "--config-predefs=yes",
-      "--enable-static",
-      `--cc=${ccOrCcache}`,
-      `--extra-cflags=${cflags.join(" ")}`,
-      `--ar=${ar}`,
-      `--extra-ldflags=${ldflags.join(" ")}`,
-    ];
-    if (debug) {
-      args.push("--debug");
-    }
-    await spawn("./configure", args, { cwd: buildPath });
-
-    // There is a bug in configure that causes it to use the wrong compiler.
-    // We need to patch the config.mak file to use the correct compiler.
-    const configPath = join(buildPath, "config.mak");
-    if (!isFile(configPath)) {
-      throw new Error("Could not find file: config.mak");
-    }
-    const configText = readFile(configPath, "utf-8");
-    if (!configText.includes(ccOrCcache)) {
-      writeFile(configPath, configText.replace(/CC=[^\n]+/g, `CC=${ccOrCcache}`));
-      print("Patched config.mak");
-    }
-
-    await spawn("make", ["libtcc.a", "-j", `${jobs}`], { cwd: buildPath });
   }
 
-  return artifacts;
+  if (os === "windows") {
+    await windowsBuild();
+  } else {
+    await posixBuild();
+  }
 }
 
 /**
  * @param {BuildOptions} options
- * @returns {Promise<string[]>}
+ * @returns {string[]}
  */
-async function buildZlib(options) {
-  const { os, cwd } = options;
-
-  let artifacts;
+function zlibArtifacts(options) {
+  const { os } = options;
   if (os === "windows") {
-    artifacts = ["zlib.lib"];
-  } else {
-    artifacts = ["libz.a"];
+    return ["zlib.lib"];
   }
+  return ["libz.a"];
+}
 
-  if (isCached(options, artifacts)) {
-    return artifacts;
-  }
+/**
+ * @param {BuildOptions} options
+ */
+async function zlibBuild(options) {
+  const { os, cwd } = options;
 
   // TODO: Make a patch to zlib for clang-cl, which implements `__builtin_ctzl` and `__builtin_expect`
   if (os === "windows") {
@@ -1162,54 +1273,30 @@ async function buildZlib(options) {
   }
 
   await cmakeGenerateBuild(options);
-  await cmakeBuild(options, ...artifacts);
-
-  return artifacts;
+  await cmakeBuild(options, ...zlibArtifacts(options));
 }
 
 /**
  * @param {BuildOptions} options
- * @returns {Promise<string[]>}
+ * @returns {string[]}
  */
-async function buildZstd(options) {
-  const { os, cwd } = options;
-
-  let artifacts;
+function zstdArtifacts(options) {
+  const { os } = options;
+  const libPath = "lib";
   if (os === "windows") {
-    artifacts = ["zstd_static.lib"];
-  } else {
-    artifacts = ["libzstd.a"];
+    return [join(libPath, "zstd_static.lib")];
   }
+  return [join(libPath, "libzstd.a")];
+}
 
-  const artifactPaths = artifacts.map(artifact => join("lib", artifact));
-  if (isCached(options, artifactPaths)) {
-    return artifactPaths;
-  }
-
+/**
+ * @param {BuildOptions} options
+ */
+async function zstdBuild(options) {
+  const { cwd } = options;
   const cmakePath = join(cwd, "build", "cmake");
   await cmakeGenerateBuild({ ...options, cwd: cmakePath }, "-DZSTD_BUILD_STATIC=ON");
-  await cmakeBuild(options, ...artifacts);
-
-  return artifactPaths;
-}
-
-/**
- * Gets whether the artifacts are cached.
- * @param {BuildOptions} options
- * @param {string[]} artifacts
- * @returns {boolean}
- */
-function isCached(options, artifacts) {
-  const { clean, buildPath } = options;
-
-  if (clean) {
-    return false;
-  }
-
-  return artifacts
-    .map(artifact => join(buildPath, artifact))
-    .map(path => isFile(path))
-    .every(Boolean);
+  await cmakeBuild(options, ...zstdArtifacts(options));
 }
 
 /**
@@ -1222,7 +1309,7 @@ function isCached(options, artifacts) {
  * @returns {string[]}
  */
 function getCFlags(options) {
-  const { cwd, os, arch, baseline, lto, pic, osxVersion, llvmVersion, artifact } = options;
+  const { cwd, debug, os, arch, baseline, lto, pic, osxVersion, llvmVersion, artifact } = options;
   const flags = [];
 
   // Relocates debug info from an absolute path to a relative path
@@ -1232,10 +1319,12 @@ function getCFlags(options) {
   }
 
   if (os === "windows") {
-    flags.push("/O2", "/Z7", "/MT", "/Ob2", "/DNDEBUG", "/U_DLL");
+    flags.push("/Z7", "/MT", "/Ob2", "/DNDEBUG", "/U_DLL");
+    if (!debug) {
+      flags.push("/O2");
+    }
   } else {
     flags.push(
-      "-O3",
       "-fno-exceptions",
       "-fvisibility=hidden",
       "-fvisibility-inlines-hidden",
@@ -1244,6 +1333,9 @@ function getCFlags(options) {
       "-fno-asynchronous-unwind-tables",
       "-fno-unwind-tables",
     );
+    if (!debug) {
+      flags.push("-O3");
+    }
   }
 
   if (arch === "x64") {
@@ -1315,6 +1407,7 @@ function getCxxFlags(options) {
   if (os === "darwin" && artifact !== "bun") {
     flags.push("-D_LIBCXX_ENABLE_ASSERTIONS=0", "-D_LIBCPP_HARDENING_MODE=_LIBCPP_HARDENING_MODE_NONE");
   }
+
   return flags;
 }
 
@@ -1338,6 +1431,7 @@ function getLdFlags(options) {
   if (os === "linux") {
     flags.push("-Wl,-z,norelro");
   }
+
   if (lto && os !== "windows") {
     flags.push("-flto=full", "-fwhole-program-vtables", "-fforce-emit-vtables");
   }
@@ -1348,15 +1442,11 @@ function getLdFlags(options) {
 /**
  * Gets the CMake flags for the given options.
  * @param {BuildOptions} options
- * @param {...string} [extraArgs]
  * @returns {string[]}
  */
-function getCmakeFlags(options, ...extraArgs) {
-  const { cwd, buildPath, debug, os, cc, cxx, ar, ranlib, ld, ccache, osxVersion, crossCompile } = options;
-
-  const cflags = getCFlags(options);
-  const cxxflags = getCxxFlags(options);
-  const ldflags = getLdFlags(options);
+function getCmakeFlags(options) {
+  const { cwd, buildPath, debug, debugSymbols, os, osxVersion } = options;
+  const { cc, cxx, ar, ranlib, ld, ccache } = options;
 
   /**
    * @param {string} path
@@ -1372,28 +1462,56 @@ function getCmakeFlags(options, ...extraArgs) {
   }
 
   const flags = [
-    cwd && `-S ${cmakePath(cwd)}`,
-    buildPath && `-B ${cmakePath(buildPath)}`,
+    `-S ${cmakePath(cwd)}`,
+    `-B ${cmakePath(buildPath)}`,
     "-GNinja",
-    cc && `-DCMAKE_C_COMPILER=${cmakePath(cc)}`,
-    `-DCMAKE_C_FLAGS=${cflags.join(" ")}`,
-    `-DCMAKE_C_STANDARD=17`,
-    `-DCMAKE_C_STANDARD_REQUIRED=ON`,
-    cxx && `-DCMAKE_CXX_COMPILER=${cmakePath(cxx)}`,
-    `-DCMAKE_CXX_FLAGS=${cxxflags.join(" ")}`,
-    `-DCMAKE_CXX_STANDARD=20`,
-    `-DCMAKE_CXX_STANDARD_REQUIRED=ON`,
-    ld && `-DCMAKE_LINKER=${cmakePath(ld)}`,
-    `-DCMAKE_LINKER_FLAGS=${ldflags.join(" ")}`,
-    ar && `-DCMAKE_AR=${ar}`,
-    ranlib && `-DCMAKE_RANLIB=${cmakePath(ranlib)}`,
-    ...extraArgs,
+    "-DCMAKE_C_STANDARD=17",
+    "-DCMAKE_C_STANDARD_REQUIRED=ON",
+    "-DCMAKE_CXX_STANDARD=20",
+    "-DCMAKE_CXX_STANDARD_REQUIRED=ON",
   ];
 
   if (debug) {
     flags.push("-DCMAKE_BUILD_TYPE=Debug");
+  } else if (debugSymbols) {
+    flags.push("-DCMAKE_BUILD_TYPE=RelWithDebInfo");
   } else {
     flags.push("-DCMAKE_BUILD_TYPE=Release");
+  }
+
+  if (cc) {
+    flags.push(`-DCMAKE_C_COMPILER=${cmakePath(cc)}`, "-DCMAKE_C_COMPILER_WORKS=ON");
+  }
+
+  const cflags = getCFlags(options);
+  if (cflags.length) {
+    flags.push(`-DCMAKE_C_FLAGS=${cflags.join(" ")}`);
+  }
+
+  if (cxx) {
+    flags.push(`-DCMAKE_CXX_COMPILER=${cmakePath(cxx)}`, "-DCMAKE_CXX_COMPILER_WORKS=ON");
+  }
+
+  const cxxflags = getCxxFlags(options);
+  if (cxxflags.length) {
+    flags.push(`-DCMAKE_CXX_FLAGS=${cxxflags.join(" ")}`);
+  }
+
+  if (ld) {
+    flags.push(`-DCMAKE_LINKER=${cmakePath(ld)}`);
+  }
+
+  const ldflags = getLdFlags(options);
+  if (ldflags.length) {
+    flags.push(`-DCMAKE_LINKER_FLAGS=${ldflags.join(" ")}`, `-DCMAKE_EXE_LINKER_FLAGS=${ldflags.join(" ")}`);
+  }
+
+  if (ar) {
+    flags.push(`-DCMAKE_AR=${cmakePath(ar)}`);
+  }
+
+  if (ranlib) {
+    flags.push(`-DCMAKE_RANLIB=${cmakePath(ranlib)}`);
   }
 
   if (ccache) {
@@ -1403,24 +1521,45 @@ function getCmakeFlags(options, ...extraArgs) {
     );
   }
 
-  if (os === "linux") {
-    // Ensure we always use -std=gnu++20 on Linux
-    flags.push("-DCMAKE_CXX_EXTENSIONS=ON");
-  } else if (os === "darwin") {
-    if (osxVersion) {
-      flags.push(`-DCMAKE_OSX_DEPLOYMENT_TARGET=${osxVersion}`);
-    }
-  } else if (os === "windows") {
-    flags.push("-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded");
+  if (os === "darwin" && osxVersion) {
+    flags.push(`-DCMAKE_OSX_DEPLOYMENT_TARGET=${osxVersion}`);
   }
 
-  if (crossCompile) {
-    flags.push("-DCMAKE_CXX_COMPILER_WORKS=1", "-DCMAKE_C_COMPILER_WORKS=1");
+  if (os === "linux") {
+    // WebKit is built with -std=gnu++20 on Linux
+    // If not specified, the build crashes on the first memory allocation
+    flags.push("-DCMAKE_CXX_EXTENSIONS=ON");
+  }
+
+  if (os === "windows") {
+    // Bug with cmake and clang-cl where "Note: including file:" is saved in the file path
+    // https://github.com/ninja-build/ninja/issues/2280
+    flags.push("-DCMAKE_CL_SHOWINCLUDES_PREFIX=Note: including file:");
+
+    // Generates a .pdb file with debug symbols, only works with cmake 3.25+
+    flags.push("-DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded", "-DCMAKE_POLICY_CMP0141=NEW");
+
+    // Selects the MSVC runtime library that supports statically-linked and multi-threaded
+    flags.push(`-DCMAKE_MSVC_RUNTIME_LIBRARY=${debug ? "MultiThreadedDebug" : "MultiThreaded"}`);
+  }
+
+  if (isColorTerminal) {
+    flags.push("-DCMAKE_COLOR_DIAGNOSTICS=ON");
   }
 
   if (isVerbose) {
-    flags.push("-DCMAKE_VERBOSE_MAKEFILE=ON", "--log-level=VERBOSE");
+    // Generates a compile_commands.json file with a list of compiler commands
+    flags.push("-DCMAKE_EXPORT_COMPILE_COMMANDS=ON");
+
+    flags.push("--log-level=VERBOSE", "-DCMAKE_VERBOSE_MAKEFILE=ON");
   }
+
+  // ?
+  // CMAKE_APPLE_SILICON_PROCESSOR
+  // CMAKE_<LANG>_CPPCHECK
+  // CMAKE_<LANG>_CPPLINT
+  // CMAKE_OSX_DEPLOYMENT_TARGET
+  // CMAKE_OSX_SYSROOT
 
   return flags.filter(Boolean);
 }
@@ -1451,8 +1590,9 @@ function getLlvmPath(llvmVersion) {
  * @param {...string} extraArgs
  */
 async function cmakeGenerateBuild(options, ...extraArgs) {
-  const args = getCmakeFlags(options, ...extraArgs);
-  await spawn("cmake", args);
+  const args = getCmakeFlags(options);
+
+  await spawn("cmake", [...args, ...extraArgs]);
 }
 
 /**
@@ -1462,18 +1602,20 @@ async function cmakeGenerateBuild(options, ...extraArgs) {
  */
 async function cmakeBuild(options, ...targets) {
   const { cwd, buildPath, debug, clean, jobs } = options;
-
   const args = ["--build", buildPath || ".", "--parallel", `${jobs}`];
+
   if (debug) {
     args.push("--config", "Debug");
   } else {
     args.push("--config", "Release");
   }
+
   if (clean) {
     args.push("--clean-first");
   }
+
   for (const target of targets) {
-    args.push("--target", target);
+    args.push("--target", basename(target));
   }
 
   await spawn("cmake", args, { cwd });
@@ -1685,6 +1827,38 @@ function getZigTarget(options) {
     default:
       throw new Error(`Unsupported Zig target: ${target}`);
   }
+}
+
+/**
+ * Gets the zig optimize level for the given options.
+ * @param {BuildOptions} options
+ * @returns {string}
+ */
+function getZigOptimize(options) {
+  const { debug, assertions, os } = options;
+  if (debug) {
+    return "Debug";
+  }
+  if (assertions || os === "windows") {
+    return "ReleaseSafe";
+  }
+  return "ReleaseFast";
+}
+
+/**
+ * Gets the CPU target for the given options.
+ * @param {BuildOptions} options
+ * @returns {string}
+ */
+function getCpuTarget(options) {
+  const { arch, baseline } = options;
+  if (baseline) {
+    return "nehalem";
+  }
+  if (arch === "x64") {
+    return "haswell";
+  }
+  return "native";
 }
 
 await main();

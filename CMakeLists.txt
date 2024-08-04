@@ -493,7 +493,6 @@ if(USE_UNIFIED_SOURCES)
 endif()
 
 # CCache
-# find_program(CCACHE_PROGRAM sccache)
 find_program(CCACHE_PROGRAM ccache)
 
 if(CCACHE_PROGRAM)
@@ -1561,22 +1560,24 @@ else()
 endif()
 
 # -- Brotli --
-set(BROTLI_SRC "${CMAKE_CURRENT_SOURCE_DIR}/src/deps/brotli")
-file(GLOB BROTLI_FILES ${CONFIGURE_DEPENDS}
-    "${BROTLI_SRC}/common/*.c"
-    "${BROTLI_SRC}/enc/*.c"
-    "${BROTLI_SRC}/dec/*.c"
-)
-add_library(brotli STATIC ${BROTLI_FILES})
-target_include_directories(brotli PRIVATE "${BROTLI_SRC}/include")
-target_compile_definitions(brotli PRIVATE "BROTLI_STATIC")
+if(NOT BUN_CPP_ONLY AND NOT BUN_ZIG_ONLY)
+    set(BROTLI_SRC "${CMAKE_CURRENT_SOURCE_DIR}/src/deps/brotli")
+    file(GLOB BROTLI_FILES ${CONFIGURE_DEPENDS}
+        "${BROTLI_SRC}/common/*.c"
+        "${BROTLI_SRC}/enc/*.c"
+        "${BROTLI_SRC}/dec/*.c"
+    )
+    add_library(brotli STATIC ${BROTLI_FILES})
+    target_include_directories(brotli PRIVATE "${BROTLI_SRC}/include")
+    target_compile_definitions(brotli PRIVATE "BROTLI_STATIC")
 
-if(WIN32)
-    target_compile_options(brotli PRIVATE /MT /U_DLL)
+    if(WIN32)
+        target_compile_options(brotli PRIVATE /MT /U_DLL)
+    endif()
+
+    target_link_libraries(${bun} PRIVATE brotli)
+    include_directories("${BUN_DEPS_DIR}/brotli/include")
 endif()
-
-target_link_libraries(${bun} PRIVATE brotli)
-include_directories("${BUN_DEPS_DIR}/brotli/include")
 
 if(USE_CUSTOM_LSHPACK)
     include_directories(${BUN_DEPS_DIR}/ls-hpack)
@@ -1630,6 +1631,10 @@ endif()
 
 if(BUN_CPP_ONLY)
     message(STATUS "NOTE: BUN_CPP_ONLY is ON, this build will only work with 'compile-cpp-only.${SCRIPT_EXTENSION}'")
+endif()
+
+if(BUN_ZIG_ONLY)
+    message(STATUS "NOTE: BUN_ZIG_ONLY is ON, this build will only build the Zig object")
 endif()
 
 if(NO_CODEGEN)

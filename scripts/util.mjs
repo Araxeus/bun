@@ -20,6 +20,7 @@ export const isCI = isBuildKite || isGithubAction || process.env["CI"] === "true
 export const isVerbose = process.argv.includes("--verbose") || isCI;
 export const isQuiet = process.argv.includes("--quiet");
 export const isDebug = process.argv.includes("--debug") || process.env["DEBUG"] === "1";
+export const isColorTerminal = isCI || process.stdout.isTTY;
 
 /**
  * Machine properties.
@@ -302,6 +303,22 @@ export function getGitRepository() {
 }
 
 /**
+ * Gets whether the pull request is a fork.
+ * @returns {boolean}
+ */
+export function isGitRepositoryFork() {
+  if (isBuildKite) {
+    return process.env["BUILDKITE_PULL_REQUEST_REPO"] !== process.env["BUILDKITE_REPO"];
+  }
+
+  if (isGithubAction) {
+    // TODO: Figure out how to detect this.
+  }
+
+  return false;
+}
+
+/**
  * Gets the pull request number, if any.
  * @returns {number | undefined}
  */
@@ -327,25 +344,11 @@ export function getGitPullRequest() {
 }
 
 /**
- * Gets whether the pull request is a fork.
+ * Gets whether the current branch is main on the main repository.
  * @returns {boolean}
  */
-export function isGitPullRequestFork() {
-  const pullRequest = getGitPullRequest();
-  if (!pullRequest) {
-    return false;
-  }
-
-  if (isBuildKite) {
-    return process.env["BUILDKITE_PULL_REQUEST_REPO"] !== process.env["BUILDKITE_REPO"];
-  }
-
-  if (isGithubAction) {
-    // TODO: Figure out how to detect this.
-    return true;
-  }
-
-  return false;
+export function isGitMainBranch() {
+  return getGitBranch() === "main" && !isGitRepositoryFork() && !getGitPullRequest();
 }
 
 /**
@@ -513,16 +516,26 @@ export function getBuildUrl() {
 }
 
 /**
- * Gets the build number.
- * @returns {number | undefined}
+ * Gets the unique build ID.
+ * @returns {string | undefined}
  */
-export function getBuildNumber() {
+export function getBuildId() {
   if (isBuildKite) {
-    return parseInt(process.env["BUILDKITE_BUILD_NUMBER"]);
+    return process.env["BUILDKITE_BUILD_NUMBER"];
   }
 
   if (isGithubAction) {
-    return parseInt(process.env["GITHUB_RUN_ID"]);
+    return process.env["GITHUB_RUN_ID"];
+  }
+}
+
+/**
+ * Gets the name of the current build step.
+ * @returns {string | undefined}
+ */
+export function getBuildStep() {
+  if (isBuildKite) {
+    return process.env["BUILDKITE_STEP_KEY"];
   }
 }
 
@@ -793,6 +806,28 @@ export function copyFile(source, target) {
   } else if (isDirectory(source)) {
     printCommand("cp", ["-r", source, target]);
     fs.cpSync(source, target, { recursive: true, force: true });
+  } else {
+    throw new Error(`Not a file or directory: ${source}`);
+  }
+}
+
+/**
+ * Moves a file or directory to the target path.
+ * @param {string} source
+ * @param {string} target
+ */
+export function moveFile(source, target) {
+  const parentPath = dirname(target);
+  if (!isDirectory(parentPath)) {
+    mkdir(parentPath);
+  }
+
+  if (isFile(source)) {
+    printCommand("mv", [source, target]);
+    fs.renameSync(source, target);
+  } else if (isDirectory(source)) {
+    printCommand("mv", ["-r", source, target]);
+    fs.renameSync(source, target);
   } else {
     throw new Error(`Not a file or directory: ${source}`);
   }
@@ -1545,9 +1580,22 @@ export function addToPath(binPath) {
   const delim = isWindows ? ";" : ":";
   const path = process.env["PATH"];
 
-  if (path && !path.includes(binPath)) {
-    print(`Adding ${binPath} to PATH`);
-    process.env["PATH"] = `${path}${delim}${binPath}`;
+  if (!path || path.includes(binPath)) {
+    return;
+  }
+
+  print(`Added {dim}${binPath}{reset} to PATH`);
+  process.env["PATH"] = `${binPath}${delim}${path}`;
+
+  const shell = process.env["SHELL"];
+  if (!isFile(shell)) {
+    return;
+  }
+
+  if (isWindows) {
+    spawnSync(shell, ["-c", `set PATH=${binPath};%PATH%`], { throwOnError: false });
+  } else {
+    spawnSync(shell, ["-c", `export PATH="${binPath}:$PATH"`], { throwOnError: false });
   }
 }
 
@@ -1570,7 +1618,9 @@ export async function runTask(label, fn) {
     return await fn();
   } finally {
     const duration = Date.now() - start;
-    print(`Took ${formatDuration(duration)}`);
+    if (duration > 10) {
+      print(`Took ${formatDuration(duration)}`);
+    }
 
     if (isGithubAction) {
       print("::endgroup::");

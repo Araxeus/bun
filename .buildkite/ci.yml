@@ -26,7 +26,7 @@ steps:
           os: "darwin"
           arch: "aarch64"
         command:
-          - "./scripts/build.mjs bun-deps"
+          - "./scripts/build.mjs deps"
 
       - key: "darwin-aarch64-build-zig"
         label: ":darwin: aarch64 - build-zig"
@@ -35,7 +35,7 @@ steps:
           os: "darwin"
           arch: "aarch64"
         command:
-          - "./scripts/build.mjs bun-zig --target darwin-aarch64"
+          - "./scripts/build.mjs zig --target darwin-aarch64 --cross-compile"
 
       - key: "darwin-aarch64-build-cpp"
         label: ":darwin: aarch64 - build-cpp"
@@ -44,7 +44,7 @@ steps:
           os: "darwin"
           arch: "aarch64"
         command:
-          - "./scripts/build.mjs bun-cpp"
+          - "./scripts/build.mjs cpp"
 
       - key: "darwin-aarch64-build-bun"
         label: ":darwin: aarch64 - build-bun"
@@ -57,7 +57,7 @@ steps:
           os: "darwin"
           arch: "aarch64"
         command:
-          - "./scripts/build.mjs bun-link"
+          - "./scripts/build.mjs link"
 
       - key: "darwin-aarch64-test-macos-14"
         label: ":darwin: 14 aarch64 - test-bun"
@@ -135,7 +135,7 @@ steps:
           os: "darwin"
           arch: "aarch64"
         command:
-          - "./scripts/build.mjs bun-zig --target darwin-x64"
+          - "./scripts/build.mjs zig --target darwin-x64 --cross-compile"
 
       - key: "darwin-x64-build-cpp"
         label: ":darwin: x64 - build-cpp"
@@ -144,7 +144,7 @@ steps:
           os: "darwin"
           arch: "x64"
         command:
-          - "./scripts/build.mjs bun-cpp"
+          - "./scripts/build.mjs cpp"
 
       - key: "darwin-x64-build-bun"
         label: ":darwin: x64 - build-bun"
@@ -157,7 +157,7 @@ steps:
           os: "darwin"
           arch: "x64"
         command:
-          - "./scripts/build.mjs bun-link"
+          - "./scripts/build.mjs link"
 
       - key: "darwin-x64-test-macos-14"
         label: ":darwin: 14 x64 - test-bun"
@@ -235,7 +235,7 @@ steps:
           os: "darwin"
           arch: "aarch64"
         command:
-          - "./scripts/build.mjs bun-zig --target linux-aarch64"
+          - "./scripts/build.mjs zig --target linux-aarch64 --cross-compile"
 
       - key: "linux-aarch64-build-cpp"
         label: ":linux: aarch64 - build-cpp"
@@ -244,7 +244,7 @@ steps:
           os: "linux"
           arch: "aarch64"
         command:
-          - "./scripts/build.mjs bun-cpp"
+          - "./scripts/build.mjs cpp"
 
       - key: "linux-aarch64-build-bun"
         label: ":linux: aarch64 - build-bun"
@@ -257,7 +257,7 @@ steps:
           os: "linux"
           arch: "aarch64"
         command:
-          - "./scripts/build.mjs bun-link"
+          - "./scripts/build.mjs link"
 
       - key: "linux-aarch64-test-debian-12"
         label: ":debian: 12 aarch64 - test-bun"
@@ -366,7 +366,7 @@ steps:
           os: "darwin"
           arch: "aarch64"
         command:
-          - "./scripts/build.mjs bun-zig --target linux-x64"
+          - "./scripts/build.mjs zig --target linux-x64 --cross-compile"
 
       - key: "linux-x64-build-cpp"
         label: ":linux: x64 - build-cpp"
@@ -375,7 +375,7 @@ steps:
           os: "linux"
           arch: "x64"
         command:
-          - "./scripts/build.mjs bun-cpp"
+          - "./scripts/build.mjs cpp"
 
       - key: "linux-x64-build-bun"
         label: ":linux: x64 - build-bun"
@@ -388,7 +388,7 @@ steps:
           os: "linux"
           arch: "x64"
         command:
-          - "./scripts/build.mjs bun-link"
+          - "./scripts/build.mjs link"
 
       - key: "linux-x64-test-debian-12"
         label: ":debian: 12 x64 - test-bun"
@@ -497,7 +497,7 @@ steps:
           os: "darwin"
           arch: "aarch64"
         command:
-          - "./scripts/build.mjs bun-zig --target linux-x64-baseline"
+          - "./scripts/build.mjs zig --target linux-x64-baseline --cross-compile"
 
       - key: "linux-x64-baseline-build-cpp"
         label: ":linux: x64-baseline - build-cpp"
@@ -506,7 +506,7 @@ steps:
           os: "linux"
           arch: "x64"
         command:
-          - "./scripts/build.mjs bun-cpp"
+          - "./scripts/build.mjs cpp"
 
       - key: "linux-x64-baseline-build-bun"
         label: ":linux: x64-baseline - build-bun"
@@ -519,7 +519,7 @@ steps:
           os: "linux"
           arch: "x64"
         command:
-          - "./scripts/build.mjs bun-link --baseline"
+          - "./scripts/build.mjs link --baseline"
 
       - key: "linux-x64-baseline-test-debian-12"
         label: ":debian: 12 x64-baseline - test-bun"
@@ -632,7 +632,7 @@ steps:
           os: "darwin" # cross-compile on Linux or Darwin
           arch: "aarch64"
         command:
-          - "./scripts/build.mjs bun-zig --target windows-x64"
+          - "./scripts/build.mjs zig --target windows-x64 --cross-compile"
 
       - key: "windows-x64-build-cpp"
         label: ":windows: x64 - build-cpp"
@@ -701,7 +701,7 @@ steps:
           os: "darwin" # cross-compile on Linux or Darwin
           arch: "aarch64"
         command:
-          - "./scripts/build.mjs bun-zig --taget windows-x64-baseline"
+          - "./scripts/build.mjs zig --taget windows-x64-baseline --cross-compile"
 
       - key: "windows-x64-baseline-build-cpp"
         label: ":windows: x64-baseline - build-cpp"
