@@ -43,8 +43,6 @@ import {
   getBuildId,
   getBuildStep,
   isGitMainBranch,
-  symlinkDir,
-  getVersion,
   chmod,
   mkdir,
   zipFile,
@@ -840,7 +838,7 @@ function getArtifacts(options) {
   const artifacts = [
     {
       name: "bun",
-      dependencies: ["bun-deps"],
+      dependencies: ["bun-deps", "bun-error", "bun-node-fallbacks", "bun-fallback-decoder", "bun-runtime-js"],
       build: bunBuild,
       artifacts: bunArtifacts(options),
     },

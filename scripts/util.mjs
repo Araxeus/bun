@@ -1842,7 +1842,7 @@ function parseMessages(result, options = {}) {
       return;
     }
     const parts = normalize(relative(pwd, filename)).replace(/\\/g, "/").split("/");
-    for (let i = 0; j < parts.length; i++) {
+    for (let i = 0; i < parts.length; i++) {
       const path = join(...parts.slice(0, i ? -i : undefined));
       if (isFile(path)) {
         return relative(pwd, path);
