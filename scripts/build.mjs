@@ -527,6 +527,7 @@ async function bunZigBuild(options) {
     args.push("-v");
   }
 
+  await bunCloneSubmodules(options);
   await cmakeGenerateBunBuild(options, "zig");
   await spawn("ninja", [zigObjectPath, ...args], {
     cwd: buildPath,
@@ -550,6 +551,7 @@ async function bunCppBuild(options) {
     args.push("-v");
   }
 
+  await bunCloneSubmodules(options);
   await cmakeGenerateBunBuild(options, "cpp");
   await spawn(shell, [scriptPath, ...args], { cwd: buildPath });
 }
@@ -579,6 +581,7 @@ async function bunBuild(options) {
     args.push("-v");
   }
 
+  await bunCloneSubmodules(options);
   await cmakeGenerateBunBuild(options);
   await spawn("ninja", args, { cwd: buildPath });
   await bunZip(options);
@@ -653,6 +656,17 @@ async function bunZip(options) {
 
     print(`Built ${name} {yellow}v${revision.trim()}{reset}`);
   }
+}
+
+/**
+ * @param {BuildOptions} options
+ */
+async function bunCloneSubmodules(options) {
+  await Promise.all(
+    getArtifacts(options)
+      .filter(({ artifactsPath }) => artifactsPath?.includes("deps"))
+      .map(artifact => gitCloneSubmodule(artifact.cwd, { force: isCI })),
+  );
 }
 
 /**
@@ -1170,10 +1184,10 @@ async function lshpackBuild(options) {
  */
 function mimallocArtifacts(options) {
   const { os, debug } = options;
-  const name = debug ? "libmimalloc-debug" : "libmimalloc";
   if (os === "windows") {
-    return [`${name}.lib`];
+    return ["mimalloc.lib"];
   }
+  const name = debug ? "libmimalloc-debug" : "libmimalloc";
   return [`${name}.a`, `${name}.o`];
 }
 

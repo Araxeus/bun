@@ -6,7 +6,7 @@
 
 import * as cp from "node:child_process";
 import * as fs from "node:fs";
-import path, { basename, dirname, normalize, relative } from "node:path";
+import path, { dirname, normalize, relative } from "node:path";
 import { normalize as normalizeWindows } from "node:path/win32";
 import { hostname, tmpdir, release } from "node:os";
 import { inspect } from "node:util";
