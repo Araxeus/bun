@@ -13,3 +13,4 @@ src/bun.js/WebKit/LayoutTests
 zig-build
 zig-cache
 zig-out
+target

@@ -6,7 +6,7 @@
 
 import * as cp from "node:child_process";
 import * as fs from "node:fs";
-import path, { dirname, relative } from "node:path";
+import path, { basename, dirname, normalize, relative } from "node:path";
 import { normalize as normalizeWindows } from "node:path/win32";
 import { hostname, tmpdir, release } from "node:os";
 import { inspect } from "node:util";
@@ -722,7 +722,7 @@ export function getVersion(command) {
  * @returns {string}
  */
 export function join(...paths) {
-  return path.join(...paths.filter(Boolean));
+  return path.join(...paths.filter(path => typeof path === "string"));
 }
 
 /**
@@ -731,7 +731,7 @@ export function join(...paths) {
  * @returns {string}
  */
 export function resolve(...paths) {
-  return path.resolve(...paths.filter(Boolean));
+  return path.resolve(...paths.filter(path => typeof path === "string"));
 }
 
 /**
@@ -864,7 +864,34 @@ export function listFiles(path, options = {}) {
  * @param {string} target
  */
 export function symlinkFile(source, target) {
+  if (exists(source) && fs.realpathSync(target) === source) {
+    return;
+  }
+
+  if (exists(target)) {
+    fs.unlinkSync(target);
+  }
+
+  printCommand("ln", ["-s", source, target]);
   fs.symlinkSync(source, target);
+}
+
+/**
+ * Creates a symlink to a directory.
+ * @param {string} source
+ * @param {string} target
+ */
+export function symlinkDir(source, target) {
+  if (exists(source) && fs.realpathSync(target) === source) {
+    return;
+  }
+
+  if (exists(target)) {
+    fs.unlinkSync(target);
+  }
+
+  printCommand("ln", ["-s", source, target]);
+  fs.symlinkSync(source, target, "dir");
 }
 
 /**
@@ -878,15 +905,24 @@ export async function zipFile(path, zipPath) {
   } else {
     await spawn("zip", ["-r", zipPath, path]);
   }
+
+  if (!isFile(zipPath)) {
+    throw new Error(`Zip file not found: ${zipPath}`);
+  }
 }
 
 /**
  * Creates a directory.
  * @param {string} path
+ * @param {Object} [options]
+ * @param {boolean} [options.clean]
  */
-export function mkdir(path) {
+export function mkdir(path, options) {
   if (isDirectory(path)) {
-    return;
+    if (!options?.clean) {
+      return;
+    }
+    removeFile(path);
   }
 
   printCommand("mkdir", ["-p", path]);
@@ -1000,7 +1036,7 @@ export async function spawn(command, args, options = {}) {
   let exitCode = -1;
   let signalCode = null;
   let spawnError = null;
-  const result = new Promise((resolve, reject) => {
+  const done = new Promise((resolve, reject) => {
     let subprocess;
     try {
       subprocess = cp.spawn(command, args, {
@@ -1012,12 +1048,7 @@ export async function spawn(command, args, options = {}) {
       subprocess.on("exit", (status, signal) => {
         exitCode = status;
         signalCode = signal;
-        if (exitCode !== 0 || signalCode) {
-          const reason = signalCode || `code ${exitCode}`;
-          reject(new Error(`Process exited: ${reason}`));
-        } else {
-          resolve();
-        }
+        resolve();
       });
       subprocess.stdout?.on("data", chunk => {
         if (!options.silent && !isQuiet) {
@@ -1037,21 +1068,21 @@ export async function spawn(command, args, options = {}) {
   });
   printCommand(command, args, options);
   try {
-    await result;
+    await done;
   } catch (cause) {
-    if (options.throwOnError !== false) {
-      const description = `${command} ${args.map(arg => (arg.includes(" ") ? `"${arg}"` : arg)).join(" ")}`;
-      throw new Error(`Command failed: ${description}`, { cause });
-    }
     spawnError = cause;
   }
-  return {
-    exitCode,
-    signalCode,
-    spawnError,
-    stdout,
-    stderr,
-  };
+  const label = `${command} ${args.includes(" ") ? `"${args}"` : args}`;
+  const result = { exitCode, signalCode, spawnError, stdout, stderr };
+  parseMessages(result, options);
+  if (exitCode === 0) {
+    return result;
+  }
+  if (options.throwOnError !== false) {
+    const cause = spawnError || new Error(`Process exited: ${signalCode || `code ${exitCode}`}`);
+    throw new Error(`Command failed: ${label}`, { cause });
+  }
+  return result;
 }
 
 /**
@@ -1700,4 +1731,190 @@ export async function buildkiteDownloadArtifact(options) {
       }
     }
   }
+}
+
+/**
+ * @typedef {Object} Message
+ * @property {string} title
+ * @property {string} content
+ * @property {string} [url]
+ * @property {string} [label]
+ * @property {string} [file]
+ * @property {number} [line]
+ * @property {number} [column]
+ * @property {"error" | "warning" | "notice"} [type]
+ */
+
+/**
+ * Prints a message to console.
+ * @param {Message} message
+ */
+export function emitMessage(message) {
+  const { content, preview, file, line, column } = message;
+
+  if (isGithubAction) {
+    // TODO
+  } else if (isBuildKite) {
+    // TODO
+  } else {
+    console.log(message);
+  }
+}
+
+/**
+ * Parses through stdout or stderr to find errors.
+ * @param {SpawnResult} result
+ * @param {SpawnOptions} [options]
+ * @returns {Message[]}
+ */
+function parseMessages(result, options = {}) {
+  const { stdout, stderr } = result;
+  const { cwd } = options;
+
+  let i = 0;
+  const lines = [...stdout.split("\n"), ...stderr.split("\n")];
+
+  /**
+   * @typedef {Object} Line
+   * @property {number} i
+   * @property {string} originalLine
+   * @property {string} line
+   */
+
+  function done() {
+    return i >= lines.length;
+  }
+
+  /**
+   * @returns {Line}
+   */
+  function peek() {
+    if (done()) {
+      throw new Error(`Unexpected end of output [${i}/${lines.length}]`);
+    }
+    const originalLine = lines[i];
+    const line = stripAnsi(originalLine);
+    return { originalLine, line };
+  }
+
+  /**
+   * @returns {Line}
+   */
+  function read() {
+    const line = peek();
+    i++;
+    return line;
+  }
+
+  /**
+   * @param {(line: Line) => boolean} fn
+   * @returns {string[]}
+   */
+  function readUntil(fn) {
+    const lines = [];
+    while (!done()) {
+      const line = read();
+      const { originalLine } = line;
+      lines.push(originalLine);
+      if (fn(line)) {
+        return lines;
+      }
+    }
+    return lines;
+  }
+
+  /**
+   * @param {number} n
+   * @returns {string[]}
+   */
+  function readNext(n) {
+    return readUntil(({ i }) => i >= n);
+  }
+
+  const pwd = process.cwd();
+
+  /**
+   * @param {string | undefined} filename
+   * @returns {string | undefined}
+   */
+  function parseFile(filename) {
+    if (!filename) {
+      return;
+    }
+    const parts = normalize(relative(pwd, filename)).replace(/\\/g, "/").split("/");
+    for (let i = 0; j < parts.length; i++) {
+      const path = join(...parts.slice(0, i ? -i : undefined));
+      if (isFile(path)) {
+        return relative(pwd, path);
+      }
+    }
+    return parts.join("/");
+  }
+
+  /**
+   * @returns {Message | undefined}
+   */
+  function parseNinjaError() {
+    const { line } = peek();
+
+    const match = /^FAILED: (?:\S+ )?(\S+)?/.exec(line);
+    if (!match) {
+      return;
+    }
+
+    const [, filename] = match;
+    const file = parseFile(filename);
+    const [title, _, ...errors] = readUntil(({ line }) =>
+      /^(?:\d+ errors? generated)|(?:ninja: build stopped)/.test(line),
+    );
+
+    return {
+      file,
+      title: file,
+      content: [title, ...errors].join("\n"),
+      type: "error",
+      label: "build error",
+    };
+  }
+
+  /**
+   * @returns {Message | undefined}
+   */
+  function parseZigError() {
+    const { line } = peek();
+
+    const match = /^(.*\.zig):(\d+):(\d+): (error|warning):/.exec(line);
+    if (!match) {
+      return;
+    }
+
+    const [, filename, ln, col, type] = match;
+    const file = parseFile(filename);
+    const lines = readUntil(({ line }) => !line);
+
+    return {
+      file,
+      line: parseInt(ln),
+      column: parseInt(col),
+      title: file,
+      content: lines.join("\n"),
+      type: "error",
+      label: "zig error",
+    };
+  }
+
+  /**
+   * @type {Message[]}
+   */
+  const messages = [];
+
+  while (!done()) {
+    const message = parseZigError() || parseNinjaError();
+    if (message) {
+      messages.push(message);
+    }
+    i++;
+  }
+
+  return messages;
 }

@@ -22,13 +22,11 @@ import {
   removeFile,
   copyFile,
   listFiles,
-  chmod,
   spawn,
   gitClone,
   parseOs,
   parseArch,
   getCpus,
-  gitClean,
   gitCloneSubmodule,
   runTask,
   print,
@@ -42,12 +40,15 @@ import {
   spawnSync,
   addToPath,
   isLinux,
-  moveFile,
-  formatDuration,
   getBuildId,
   getBuildStep,
-  isColorTerminal,
   isGitMainBranch,
+  symlinkDir,
+  getVersion,
+  chmod,
+  mkdir,
+  zipFile,
+  symlinkFile,
 } from "./util.mjs";
 
 /**
@@ -137,8 +138,6 @@ async function main() {
     name: "debug-symbols",
     description: "If debug symbols should be generated",
     type: "boolean",
-    defaultValue: false,
-    // defaultValue: debug || !isCI || !isGitMainBranch(),
   });
 
   const lto = getOption({
@@ -287,8 +286,12 @@ async function main() {
     name: "build-path",
     description: "The build directory",
     parse: resolve,
-    defaultValue: join(cwd, "build", debug ? "debug" : "release", target),
+    defaultValue: join(cwd, "target", debug ? "debug" : "release", target),
   });
+
+  if (!isCI && machineOs === os && machineArch === arch) {
+    symlinkDir(buildPath, join(cwd, "build"));
+  }
 
   const cachePath = getOption({
     name: "cache-path",
@@ -393,6 +396,7 @@ async function main() {
   });
 
   process.env["FORCE_COLOR"] = noColor ? "0" : "1";
+  process.env["CLICOLOR_FORCE"] = "1";
 
   const args = process.argv.slice(2).filter(arg => !arg.startsWith("-"));
   await build(options, ...args);
@@ -450,9 +454,11 @@ export async function build(options, ...args) {
   }
 
   const { buildPath: baseBuildPath, clean, dump } = options;
-  await runTask("Builds", () => console.log(builds.map(({ name }) => name)));
-  await runTask("Options", () => console.log(options));
-  await runTask("Environment", () => console.log(process.env));
+  if (dump || isCI) {
+    await runTask("Builds", () => console.log(builds.map(({ name }) => name)));
+    await runTask("Options", () => console.log(options));
+    await runTask("Environment", () => console.log(process.env));
+  }
   if (dump) {
     return;
   }
@@ -488,14 +494,16 @@ export async function build(options, ...args) {
       await Promise.all(artifacts.map(uploadArtifact));
     }
 
-    if (artifacts.length && artifacts.every(name => isFile(join(buildPath, name)))) {
+    const isDependency = artifactsPath?.includes("deps");
+
+    if (isDependency && artifacts.length && artifacts.every(name => isFile(join(buildPath, name)))) {
       await runTask(`Cached ${name}`, uploadArtifacts);
       continue;
     }
 
     await runTask(`Building ${name}`, async () => {
-      if (artifactsPath) {
-        await gitCloneSubmodule(artifactsPath, { force: isCI });
+      if (isDependency) {
+        await gitCloneSubmodule(cwd, { force: isCI });
       }
 
       if (clean) {
@@ -565,6 +573,7 @@ async function bunLinkBuild(options) {
 
   await cmakeGenerateBunBuild(options, "link");
   await spawn("ninja", args, { cwd: buildPath });
+  await bunZip(options);
 }
 
 /**
@@ -579,6 +588,78 @@ async function bunBuild(options) {
 
   await cmakeGenerateBunBuild(options);
   await spawn("ninja", args, { cwd: buildPath });
+  await bunZip(options);
+}
+
+/**
+ * @param {BuildOptions} options
+ * @returns {string[]}
+ */
+function bunArtifacts(options) {
+  const { debug, target } = options;
+
+  let artifacts;
+  if (debug) {
+    artifacts = ["bun-debug"];
+  } else {
+    artifacts = ["bun", "bun-profile"];
+  }
+
+  if (isCI) {
+    return artifacts.map(name => `${name.replace("bun", target)}.zip`);
+  }
+
+  return artifacts;
+}
+
+/**
+ * Creates a zip file for the given build.
+ * @param {BuildOptions} options
+ */
+async function bunZip(options) {
+  const { buildPath, debug, os, target } = options;
+  const names = debug ? ["bun-debug"] : ["bun", "bun-profile"];
+
+  for (const name of names) {
+    const exe = os === "windows" ? `${name}.exe` : name;
+
+    let artifacts;
+    if (os === "windows") {
+      artifacts = [exe, `${exe}.pdb`];
+    } else if (os === "darwin" && !debug) {
+      artifacts = [exe, `${exe}.dSYM`];
+    } else {
+      artifacts = [exe];
+    }
+
+    for (const artifact of artifacts) {
+      const artifactPath = join(buildPath, artifact);
+      if (!isFile(artifactPath)) {
+        throw new Error(`Artifact not found: ${artifactPath}`);
+      }
+    }
+
+    const exePath = join(buildPath, exe);
+    chmod(exePath, 0o755);
+    const { stdout: revision } = await spawn(exePath, ["--revision"], { silent: true });
+
+    if (isCI) {
+      const label = name.replace("bun", target);
+      const targetPath = join(buildPath, label);
+      mkdir(targetPath, { clean: true });
+      for (const artifact of artifacts) {
+        copyFile(join(buildPath, artifact), join(targetPath, artifact));
+      }
+
+      const zipPath = join(buildPath, `${label}.zip`);
+      await zipFile(targetPath, zipPath);
+      removeFile(targetPath);
+    } else {
+      symlinkFile(exePath, join(dirname(buildPath), exe));
+    }
+
+    print(`Built ${name} {yellow}v${revision.trim()}{reset}`);
+  }
 }
 
 /**
@@ -766,11 +847,13 @@ function getArtifacts(options) {
       name: "bun",
       dependencies: ["bun-deps"],
       build: bunBuild,
+      artifacts: bunArtifacts(options),
     },
     {
       name: "bun-link",
       aliases: ["link"],
       build: bunLinkBuild,
+      artifacts: bunArtifacts(options),
     },
     {
       name: "bun-cpp",
@@ -1119,7 +1202,7 @@ async function mimallocBuild(options) {
     "-DMI_OSX_ZONE=OFF",
   ];
   if (debug) {
-    flags.push("-DMI_DEBUG=1");
+    flags.push("-DMI_DEBUG_FULL=1");
   }
   if (valgrind) {
     flags.push("-DMI_TRACK_VALGRIND=ON");
@@ -1312,8 +1395,12 @@ function getCFlags(options) {
 
   // Relocates debug info from an absolute path to a relative path
   // https://ccache.dev/manual/4.8.2.html#_compiling_in_different_directories
-  if (cwd && os !== "windows") {
+  if (os !== "windows") {
     flags.push(`-fdebug-prefix-map=${cwd}=.`);
+  }
+
+  if (os !== "windows") {
+    flags.push("-fansi-escape-codes", "-fdiagnostics-color=always");
   }
 
   if (os === "windows") {
@@ -1467,6 +1554,7 @@ function getCmakeFlags(options) {
     "-DCMAKE_C_STANDARD_REQUIRED=ON",
     "-DCMAKE_CXX_STANDARD=20",
     "-DCMAKE_CXX_STANDARD_REQUIRED=ON",
+    "-DCMAKE_COLOR_DIAGNOSTICS=ON",
   ];
 
   if (debug) {
@@ -1539,10 +1627,6 @@ function getCmakeFlags(options) {
 
     // Selects the MSVC runtime library that supports statically-linked and multi-threaded
     flags.push(`-DCMAKE_MSVC_RUNTIME_LIBRARY=${debug ? "MultiThreadedDebug" : "MultiThreaded"}`);
-  }
-
-  if (isColorTerminal) {
-    flags.push("-DCMAKE_COLOR_DIAGNOSTICS=ON");
   }
 
   if (isVerbose) {
