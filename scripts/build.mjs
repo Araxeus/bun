@@ -161,7 +161,6 @@ async function main() {
     name: "assertions",
     description: "If debug assertions should be enabled",
     type: "boolean",
-    defaultValue: debug || !isCI || !isGitMainBranch(),
   });
 
   const canary = getOption({
@@ -286,12 +285,8 @@ async function main() {
     name: "build-path",
     description: "The build directory",
     parse: resolve,
-    defaultValue: join(cwd, "target", debug ? "debug" : "release", target),
+    defaultValue: join(cwd, "build", debug ? "debug" : "release", target),
   });
-
-  if (!isCI && machineOs === os && machineArch === arch) {
-    symlinkDir(buildPath, join(cwd, "build"));
-  }
 
   const cachePath = getOption({
     name: "cache-path",
@@ -655,7 +650,7 @@ async function bunZip(options) {
       await zipFile(targetPath, zipPath);
       removeFile(targetPath);
     } else {
-      symlinkFile(exePath, join(dirname(buildPath), exe));
+      symlinkFile(exePath, join(cwd, "build", exe));
     }
 
     print(`Built ${name} {yellow}v${revision.trim()}{reset}`);
