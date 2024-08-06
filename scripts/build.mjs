@@ -870,7 +870,7 @@ async function packageBun(options) {
     if (os === "windows") {
       artifacts.push("bun.pdb");
     } else if (os === "darwin" && !debug) {
-      artifacts.push("bun-profile.dSYM");
+      // FIXME: artifacts.push("bun-profile.dSYM");
     }
 
     for (const artifact of artifacts) {
