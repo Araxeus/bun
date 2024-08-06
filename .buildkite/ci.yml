@@ -519,7 +519,7 @@ steps:
           os: "linux"
           arch: "x64"
         command:
-          - "./scripts/build.mjs link --baseline"
+          - "./scripts/build.mjs bun-link --baseline"
 
       - key: "linux-x64-baseline-test-debian-12"
         label: ":debian: 12 x64-baseline - test-bun"
