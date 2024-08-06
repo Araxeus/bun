@@ -1624,7 +1624,7 @@ function getLdFlags(options) {
 function getCmakePath(path) {
   // clang-cl doesn't support unescaped backslashes, otherwise it fails with:
   // Invalid character escape '\U'
-  if (os === "windows") {
+  if (isWindows) {
     return path.replace(/\\/g, "/");
   }
   return path;
