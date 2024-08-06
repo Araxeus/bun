@@ -217,9 +217,20 @@ export function getCpus() {
 
 /**
  * Gets the commit SHA.
+ * @param {string} [cwd]
  * @returns {string | undefined}
  */
-export function getGitSha() {
+export function getGitSha(cwd) {
+  if (cwd) {
+    const { exitCode, stdout } = spawnSync("git", ["rev-parse", "HEAD"], {
+      cwd,
+      throwOnError: false,
+    });
+    if (exitCode === 0) {
+      return stdout.trim();
+    }
+  }
+
   if (isBuildKite) {
     return process.env["BUILDKITE_COMMIT"];
   }
@@ -227,21 +238,24 @@ export function getGitSha() {
   if (isGithubAction) {
     return process.env["GITHUB_SHA"];
   }
-
-  const { exitCode, stdout } = spawnSync("git", ["rev-parse", "HEAD"], {
-    silent: true,
-    throwOnError: false,
-  });
-  if (exitCode === 0) {
-    return stdout.trim();
-  }
 }
 
 /**
  * Gets the git branch.
+ * @param {string} [cwd]
  * @returns {string | undefined}
  */
-export function getGitBranch() {
+export function getGitBranch(cwd) {
+  if (cwd) {
+    const { exitCode, stdout } = spawnSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
+      cwd,
+      throwOnError: false,
+    });
+    if (exitCode === 0) {
+      return stdout.trim();
+    }
+  }
+
   if (isBuildKite) {
     return process.env["BUILDKITE_BRANCH"];
   }
@@ -249,21 +263,24 @@ export function getGitBranch() {
   if (isGithubAction) {
     return process.env["GITHUB_REF_NAME"];
   }
-
-  const { exitCode, stdout } = spawnSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
-    silent: true,
-    throwOnError: false,
-  });
-  if (exitCode === 0) {
-    return stdout.trim();
-  }
 }
 
 /**
  * Gets the git repository URL.
+ * @param {string} [cwd]
  * @returns {string | undefined}
  */
-export function getGitUrl() {
+export function getGitUrl(cwd) {
+  if (cwd) {
+    const { exitCode, stdout } = spawnSync("git", ["remote", "get-url", "origin"], {
+      cwd,
+      throwOnError: false,
+    });
+    if (exitCode === 0) {
+      return stdout.trim();
+    }
+  }
+
   if (isBuildKite) {
     return process.env["BUILDKITE_PULL_REQUEST_REPO"] || process.env["BUILDKITE_REPO"];
   }
@@ -275,22 +292,15 @@ export function getGitUrl() {
       return `${baseUrl}/${repository}`;
     }
   }
-
-  const { exitCode, stdout } = spawnSync("git", ["remote", "get-url", "origin"], {
-    silent: true,
-    throwOnError: false,
-  });
-  if (exitCode === 0) {
-    return stdout.trim();
-  }
 }
 
 /**
  * Gets the git repository.
+ * @param {string} [cwd]
  * @returns {string | undefined}
  */
-export function getGitRepository() {
-  const url = getGitUrl();
+export function getGitRepository(cwd) {
+  const url = getGitUrl(cwd);
   if (!url) {
     return;
   }
@@ -345,16 +355,17 @@ export function getGitPullRequest() {
 
 /**
  * Gets whether the current branch is main on the main repository.
+ * @param {string} [cwd]
  * @returns {boolean}
  */
-export function isGitMainBranch() {
-  return getGitBranch() === "main" && !isGitRepositoryFork() && !getGitPullRequest();
+export function isGitMainBranch(cwd) {
+  return getGitBranch(cwd) === "main" && (cwd || (!isGitRepositoryFork() && !getGitPullRequest()));
 }
 
 /**
  * @typedef {Object} GitCloneOptions
  * @property {string} cwd
- * @property {string} [url]
+ * @property {string} repository
  * @property {string} [commit]
  * @property {boolean} [recursive]
  */
@@ -364,7 +375,7 @@ export function isGitMainBranch() {
  * @param {GitCloneOptions} options
  */
 export async function gitClone(options) {
-  const { cwd, url, recursive, commit } = options;
+  const { cwd, repository, recursive, commit } = options;
   const jobs = `${getCpus()}`;
 
   /**
@@ -373,13 +384,22 @@ export async function gitClone(options) {
    */
   async function clone(cwd) {
     {
-      const { exitCode } = await spawn("git", ["init"], { cwd, throwOnError: false });
+      const { exitCode, stdout } = await spawn("git", ["rev-parse", "HEAD"], { cwd, throwOnError: false });
+      if (exitCode === 0 && stdout.trim() === commit) {
+        return true;
+      }
+    }
+    {
+      const { exitCode } = await spawn("git", ["-c", "init.defaultBranch=main", "init"], { cwd, throwOnError: false });
       if (exitCode !== 0) {
         return false;
       }
     }
     {
-      const { exitCode, stderr } = await spawn("git", ["remote", "add", "origin", url], { cwd, throwOnError: false });
+      const { exitCode, stderr } = await spawn("git", ["remote", "add", "origin", repository], {
+        cwd,
+        throwOnError: false,
+      });
       if (exitCode !== 0 && !stderr.includes("remote origin already exists")) {
         return false;
       }
@@ -407,15 +427,18 @@ export async function gitClone(options) {
   }
 
   mkdir(cwd);
-  let done = await clone(cwd);
 
-  if (!done) {
-    removeFile(cwd);
-    done = await clone(options);
+  let done;
+  for (let i = 0; i < 3; i++) {
+    done = await clone(cwd);
+    if (done) {
+      break;
+    }
+    await backOff(i);
   }
 
   if (!done) {
-    throw new Error(`Failed to clone repository: ${url}`);
+    throw new Error(`Failed to clone repository: ${repository}`);
   }
 }
 
@@ -659,10 +682,12 @@ export function which(command, options = {}) {
  */
 export function getVersion(command) {
   let args;
+  let env = { PATH: process.env.PATH };
   if (/(?:zig|go)$/.test(command)) {
     args = ["version"];
   } else if (/(?:bun|bun\-[a-z]+)$/.test(command)) {
     args = ["--revision"];
+    env["BUN_DEBUG_QUIET_LOGS"] = "1";
   } else {
     args = ["--version"];
   }
@@ -670,10 +695,7 @@ export function getVersion(command) {
   const { exitCode, stdout } = spawnSync(command, args, {
     silent: !isVerbose,
     throwOnError: false,
-    env: {
-      PATH: process.env.PATH,
-      BUN_DEBUG_QUIET_LOGS: "1",
-    },
+    env,
   });
 
   if (exitCode === 0) {
@@ -1105,7 +1127,7 @@ export function printCommand(command, args = [], options = {}) {
     print(`{yellow}{bold}cd {reset}{dim}${cwd}{reset}`);
   }
   print(
-    `{cyan}{bold}$ {reset}{dim}${command} ${args.map(arg => (arg.includes(" ") ? `"${arg}"` : arg)).join(" ")}{reset}`,
+    `{cyan}{bold}$ {reset}{dim}${command} ${args.map(arg => (arg?.includes(" ") ? `"${arg}"` : arg)).join(" ")}{reset}`,
   );
 }
 
@@ -1588,7 +1610,9 @@ export function addToPath(binPath) {
     return;
   }
 
-  print(`Added {dim}${binPath}{reset} to PATH`);
+  if (isVerbose) {
+    print(`Adding {dim}${binPath}{reset} to PATH`);
+  }
   process.env["PATH"] = `${binPath}${delim}${path}`;
 
   const shell = process.env["SHELL"];

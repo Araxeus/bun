@@ -59,13 +59,15 @@
 /src/deps/c-ares
 /src/deps/libarchive
 /src/deps/libdeflate
-/src/deps/lolhtml
-/src/deps/lshpack
+/src/deps/lol-html
+/src/deps/ls-hpack
 /src/deps/mimalloc
 /src/deps/tinycc
 /src/deps/zlib
 /src/deps/zstd
 /src/deps/libuv
+/src/deps/picohttpparser
+/src/deps/zig
 target
 build
 build.ninja

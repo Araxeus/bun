@@ -23,11 +23,9 @@ import {
   copyFile,
   listFiles,
   spawn,
-  gitClone,
   parseOs,
   parseArch,
   getCpus,
-  gitCloneSubmodule,
   runTask,
   print,
   compareSemver,
@@ -47,6 +45,7 @@ import {
   mkdir,
   zipFile,
   symlinkFile,
+  gitClone,
 } from "./util.mjs";
 
 async function main() {
@@ -108,7 +107,7 @@ async function main() {
  * @property {"x64" | "aarch64"} arch
  * @property {boolean} [baseline]
  * @property {string} [target]
- * @property {boolean} [release]
+ * @property {boolean} [webkit]
  * @property {boolean} [debug]
  * @property {boolean} [lto]
  * @property {boolean} [pic]
@@ -176,6 +175,12 @@ export function getBuildOptions() {
   if (!crossCompile && (machineOs !== os || machineArch !== arch)) {
     throw new Error(`Cross-compilation is not enabled, use --cross-compile if you want to compile: ${target}`);
   }
+
+  const webkit = getOption({
+    name: "webkit",
+    description: "If WebKit should be built locally, instead of using prebuilt binaries",
+    type: "boolean",
+  });
 
   const debug = getOption({
     name: "debug",
@@ -376,6 +381,7 @@ export function getBuildOptions() {
     arch,
     baseline,
     target,
+    webkit,
     lto,
     debug,
     debugSymbols,
@@ -405,114 +411,90 @@ export function getBuildOptions() {
  * @param  {...string} args
  */
 export async function build(options, ...args) {
-  const artifacts = getArtifacts(options);
+  const knownArtifacts = getArtifacts(options);
+
   /**
    * @type {Artifact[]}
    */
-  const builds = [];
+  const artifacts = [];
 
   /**
-   * @param {string} query
+   * @param {string} label
    */
-  function addBuild(query) {
-    const matches = artifacts.filter(({ name, aliases }) => name === query || aliases?.includes(query));
-    if (!matches.length) {
-      throw new Error(`Unknown artifact: ${query}`);
+  function addArtifact(label) {
+    const results = knownArtifacts.filter(({ name, aliases }) => name === label || aliases?.includes(label));
+    if (!results.length) {
+      throw new Error(`Unknown artifact: ${label}`);
     }
 
-    for (const artifact of matches) {
-      const { dependencies } = artifact;
-
-      if (builds.some(({ name }) => name === artifact.name)) {
+    for (const artifact of results) {
+      const { name, dependencies } = artifact;
+      if (artifacts.some(({ name: label }) => label === name)) {
         return;
       }
 
-      dependencies?.forEach(dependency => addBuild(dependency));
-      builds.push(artifact);
+      if (dependencies) {
+        dependencies.forEach(dependency => addArtifact(dependency));
+      }
+      artifacts.push(artifact);
     }
   }
 
   for (const arg of args) {
-    const buildCount = builds.length;
+    addArtifact(arg);
+  }
 
-    for (const artifact of artifacts) {
-      const { name, aliases } = artifact;
-      if (arg === name || aliases?.includes(arg)) {
-        addBuild(name);
-      }
+  if (!artifacts.length) {
+    addArtifact("bun");
+  }
+
+  const { clean, dump } = options;
+  if (isCI || dump) {
+    await runTask("{dim}Artifacts{reset}", () => console.log(artifacts.map(({ name }) => name)));
+    await runTask("{dim}Options{reset}", () => console.log(options));
+    await runTask("{dim}Environment{reset}", () => console.log(process.env));
+    if (dump) {
+      return;
     }
-
-    if (builds.length === buildCount) {
-      throw new Error(`Unknown artifact: ${arg}`);
-    }
   }
 
-  if (!builds.length) {
-    addBuild("bun");
-  }
-
-  const { buildPath: baseBuildPath, clean, dump } = options;
-  if (dump || isCI) {
-    await runTask("Builds", () => console.log(builds.map(({ name }) => name)));
-    await runTask("Options", () => console.log(options));
-    await runTask("Environment", () => console.log(process.env));
-  }
-  if (dump) {
-    return;
-  }
-
-  for (const { name, cwd, build, artifacts = [], artifactsPath } of builds) {
-    const buildPath = join(baseBuildPath, name);
-    const buildOptions = {
-      ...options,
-      cwd: cwd || options.cwd,
-      buildPath,
-      artifact: name.startsWith("bun") ? "bun" : name,
-    };
+  for (const artifact of artifacts) {
+    const { name, cwd, buildPath, build, artifacts, artifactsPath, repository, commit } = artifact;
+    const label = name.startsWith("bun") ? "bun" : name;
+    const buildOptions = { ...options, cwd, buildPath, artifact: label };
 
     /**
-     * @param {string} path
+     * @param {string} artifact
      */
-    async function uploadArtifact(path) {
-      const artifactPath = join(buildPath, path);
+    async function uploadArtifact(artifact) {
+      const artifactPath = join(buildPath, artifact);
       if (!isFile(artifactPath)) {
-        throw new Error(`No artifact found: ${path}`);
+        throw new Error(`No artifact found: ${artifact}`);
       }
-
-      if (artifactsPath) {
-        copyFile(artifactPath, join(artifactsPath, basename(path)));
-      }
-
       if (isBuildKite) {
-        await buildkiteUploadArtifact(artifactPath);
+        return buildkiteUploadArtifact(artifactPath);
       }
-    }
-
-    async function uploadArtifacts() {
-      await Promise.all(artifacts.map(uploadArtifact));
-    }
-
-    const isDependency = artifactsPath?.includes("deps");
-
-    if (isDependency && artifacts.length && artifacts.every(name => isFile(join(buildPath, name)))) {
-      await runTask(`Cached ${name}`, uploadArtifacts);
-      continue;
+      if (artifactsPath) {
+        copyFile(artifactPath, join(artifactsPath, basename(artifact)));
+      }
     }
 
     await runTask(`Building ${name}`, async () => {
-      if (isDependency) {
-        await gitCloneSubmodule(cwd, { force: isCI });
+      if (repository) {
+        await gitClone({ cwd, repository, commit });
       }
-
       if (clean) {
         removeFile(buildPath);
-        for (const artifact of artifacts) {
-          removeFile(join(buildPath, artifact));
+        if (artifacts) {
+          for (const artifact of artifacts) {
+            removeFile(join(buildPath, artifact));
+          }
         }
       }
-
       await build(buildOptions);
-      await uploadArtifacts();
+      if (artifacts) {
+        await Promise.all(artifacts.map(uploadArtifact));
+      }
     });
   }
 }
@@ -535,7 +517,7 @@ export async function build(options, ...args) {
  * @returns {Artifact[]}
  */
 function getArtifacts(options) {
-  const { os, cwd, buildPath } = options;
+  const { os, cwd, buildPath, webkit } = options;
 
   /**
    * @type {Artifact[]}
@@ -544,18 +526,18 @@ function getArtifacts(options) {
 
   function addArtifact(artifact) {
     const { cwd, buildPath } = options;
-    const { repository } = artifact;
+    const { name, repository, cwd: artifactPath } = artifact;
 
     if (repository) {
       const pwd = process.cwd();
-      if (cwd === pwd || !cwd) {
-        throw new Error(`Cannot add submodule in the current directory: ${name} in ${pwd}`);
+      if (artifactPath === cwd || (!artifactPath && cwd === pwd)) {
+        throw new Error(`Cannot add submodule in the current directory: ${name} in ${artifactPath || pwd}`);
       }
     }
 
     artifacts.push({
       cwd,
-      buildPath,
+      buildPath: join(buildPath, name),
       build: () => {},
       ...artifact,
     });
@@ -563,73 +545,55 @@ function getArtifacts(options) {
 
   addArtifact({
     name: "bun",
-    dependencies: ["bun-deps", "bun-old-js"],
+    dependencies: ["bun-deps", "bun-old-js", "picohttpparser", "zig"],
     artifacts: getBunArtifacts(options),
     build: buildBun,
   });
 
   addArtifact({
     name: "bun-link",
-    aliases: ["link"],
     artifacts: getBunArtifacts(options),
     build: linkBun,
   });
 
   addArtifact({
     name: "bun-cpp",
-    aliases: ["cpp"],
+    dependencies: ["picohttpparser"],
     artifacts: ["bun-cpp-objects.a"],
     build: buildBunCpp,
   });
 
   addArtifact({
-    name: "bun-zig-submodule",
-    aliases: ["zig-submodule"],
-    repository: "https://github.com/oven-sh/zig.git",
-    commit: "4c283af60cdae205df5a872530c77e2a6a307d43",
-    cwd: join(cwd, "src", "deps", "zig"),
-  });
-
-  addArtifact({
     name: "bun-zig",
-    aliases: ["zig"],
-    dependencies: ["bun-zig-submodule", "bun-old-js"],
+    dependencies: ["zig", "bun-old-js"],
     artifacts: ["bun-zig.o"],
     build: buildBunZig,
   });
 
   addArtifact({
     name: "bun-node-fallbacks",
-    aliases: ["node-fallbacks", "bun-old-js", "old-js"],
+    aliases: ["bun-old-js"],
     cwd: join(cwd, "src", "node-fallbacks"),
     build: buildBunNodeFallbacks,
   });
 
   addArtifact({
     name: "bun-error",
-    aliases: ["bun-old-js", "old-js"],
+    aliases: ["bun-old-js"],
     cwd: join(cwd, "packages", "bun-error"),
     build: buildBunError,
   });
 
   addArtifact({
     name: "bun-fallback-decoder",
-    aliases: ["fallback-decoder", "bun-old-js", "old-js"],
+    aliases: ["bun-old-js"],
     build: buildBunFallbackDecoder,
   });
 
   addArtifact({
     name: "bun-runtime-js",
-    aliases: ["runtime-js", "bun-old-js", "old-js"],
+    aliases: ["bun-old-js"],
     build: buildBunRuntimeJs,
-  });
-
-  addArtifact({
-    name: "bun-webkit",
-    aliases: ["webkit"],
-    repository: "https://github.com/oven-sh/WebKit.git",
-    commit: "13bb88da0b791154dca60910f301dcd70c321f72",
-    cwd: join(cwd, "src", "bun.js", "WebKit"),
   });
 
   const depsPath = join(cwd, "src", "deps");
@@ -658,8 +622,8 @@ function getArtifacts(options) {
   });
 
   addDependency({
-    name: "cares",
-    aliases: ["c-ares"],
+    name: "c-ares",
+    aliases: ["cares"],
     repository: "https://github.com/c-ares/c-ares.git",
     commit: "d1722e6e8acaf10eb73fa995798a9cd421d9f85e",
     artifacts: getCaresArtifacts(options),
@@ -683,8 +647,8 @@ function getArtifacts(options) {
   });
 
   addDependency({
-    name: "lolhtml",
-    aliases: ["lol-html"],
+    name: "lol-html",
+    aliases: ["lolhtml"],
     repository: "https://github.com/cloudflare/lol-html.git",
     commit: "8d4c273ded322193d017042d1f48df2766b0f88b",
     artifacts: getLolhtmlArtifacts(options),
@@ -692,8 +656,8 @@ function getArtifacts(options) {
   });
 
   addDependency({
-    name: "lshpack",
-    aliases: ["ls-hpack"],
+    name: "ls-hpack",
+    aliases: ["lshpack"],
     repository: "https://github.com/litespeedtech/ls-hpack.git",
     commit: "3d0f1fc1d6e66a642e7a98c55deb38aa986eb4b0",
     artifacts: getLshpackArtifacts(options),
@@ -732,12 +696,6 @@ function getArtifacts(options) {
     build: buildZstd,
   });
 
-  addDependency({
-    name: "picohttpparser",
-    repository: "https://github.com/h2o/picohttpparser.git",
-    commit: "066d2b1e9ab820703db0837a7255d92d30f0c9f5",
-  });
-
   if (os === "windows") {
     addDependency({
       name: "libuv",
@@ -745,6 +703,34 @@ function getArtifacts(options) {
       build: buildLibuv,
       repository: "https://github.com/libuv/libuv.git",
       commit: "da527d8d2a908b824def74382761566371439003",
+    });
+  }
+
+  function addSubmodule(submodule) {
+    addArtifact(submodule);
+  }
+
+  addSubmodule({
+    name: "picohttpparser",
+    repository: "https://github.com/h2o/picohttpparser.git",
+    commit: "066d2b1e9ab820703db0837a7255d92d30f0c9f5",
+    cwd: join(depsPath, "picohttpparser"),
+  });
+
+  addSubmodule({
+    name: "zig",
+    repository: "https://github.com/oven-sh/zig.git",
+    commit: "131a009ba2eb127a3447d05b9e12f710429aa5ee",
+    cwd: join(depsPath, "zig"),
+  });
+
+  if (webkit) {
+    addSubmodule({
+      name: "bun-webkit",
+      aliases: ["webkit"],
+      repository: "https://github.com/oven-sh/WebKit.git",
+      commit: "13bb88da0b791154dca60910f301dcd70c321f72",
+      cwd: join(cwd, "src", "bun.js", "WebKit"),
     });
   }
 
@@ -766,7 +752,6 @@ async function buildBunZig(options) {
     args.push("-v");
   }
 
-  await bunCloneSubmodules(options);
   await cmakeGenerateBunBuild(options, "zig");
   await spawn("ninja", [zigObjectPath, ...args], {
     cwd: buildPath,
@@ -790,7 +775,6 @@ async function buildBunCpp(options) {
     args.push("-v");
   }
 
-  await bunCloneSubmodules(options);
   await cmakeGenerateBunBuild(options, "cpp");
   await spawn(shell, [scriptPath, ...args], { cwd: buildPath });
 }
@@ -820,7 +804,6 @@ async function buildBun(options) {
     args.push("-v");
   }
 
-  await bunCloneSubmodules(options);
   await cmakeGenerateBunBuild(options);
   await spawn("ninja", args, { cwd: buildPath });
   await packageBun(options);
@@ -831,7 +814,7 @@ async function buildBun(options) {
  * @param {BuildOptions} options
  */
 async function packageBun(options) {
-  const { buildPath, debug, os, target } = options;
+  const { cwd, buildPath, debug, os, target } = options;
   const names = debug ? ["bun-debug"] : ["bun", "bun-profile"];
 
   for (const name of names) {
@@ -895,17 +878,6 @@ function getBunArtifacts(options) {
   }
 
   return artifacts;
-}
-
-/**
- * @param {BuildOptions} options
- */
-async function bunCloneSubmodules(options) {
-  await Promise.all(
-    getArtifacts(options)
-      .filter(({ artifactsPath }) => artifactsPath?.includes("deps"))
-      .map(artifact => gitCloneSubmodule(artifact.cwd, { force: isCI })),
-  );
 }
 
 /**
@@ -1086,7 +1058,7 @@ function getBoringSslArtifacts(options) {
  */
 async function buildBoringSsl(options) {
   await cmakeGenerateBuild(options);
-  await cmakeBuild(options, ...boringSslArtifacts(options));
+  await cmakeBuild(options, ...getBoringSslArtifacts(options));
 }
 
 /**
@@ -1112,7 +1084,7 @@ async function buildCares(options) {
     "-DCARES_STATIC_PIC=ON",
     "-DCARES_SHARED=OFF",
   );
-  await cmakeBuild(options, ...caresArtifacts(options));
+  await cmakeBuild(options, ...getCaresArtifacts(options));
 }
 
 /**
@@ -1181,7 +1153,7 @@ async function buildLibdeflate(options) {
     "-DLIBDEFLATE_BUILD_SHARED_LIB=OFF",
     "-DLIBDEFLATE_BUILD_GZIP=OFF",
   );
-  await cmakeBuild(options, ...libdeflateArtifacts(options));
+  await cmakeBuild(options, ...getLibdeflateArtifacts(options));
 }
 
 /**
@@ -1245,7 +1217,7 @@ function getLshpackArtifacts(options) {
 async function buildLshpack(options) {
   // FIXME: There is a linking issue with lshpack built in debug mode or debug symbols
   await cmakeGenerateBuild({ ...options, debug: false, debugSymbols: false }, "-DLSHPACK_XXH=ON", "-DSHARED=0");
-  await cmakeBuild(options, ...lshpackArtifacts(options));
+  await cmakeBuild(options, ...getLshpackArtifacts(options));
 }
 
 /**
@@ -1431,7 +1403,7 @@ async function buildZlib(options) {
   }
 
   await cmakeGenerateBuild(options);
-  await cmakeBuild(options, ...zlibArtifacts(options));
+  await cmakeBuild(options, ...getZlibArtifacts(options));
 }
 
 /**
@@ -1454,7 +1426,7 @@ async function buildZstd(options) {
   const { cwd } = options;
   const cmakePath = join(cwd, "build", "cmake");
   await cmakeGenerateBuild({ ...options, cwd: cmakePath }, "-DZSTD_BUILD_STATIC=ON");
-  await cmakeBuild(options, ...zstdArtifacts(options));
+  await cmakeBuild(options, ...getZstdArtifacts(options));
 }
 
 /**
