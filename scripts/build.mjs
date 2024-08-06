@@ -417,18 +417,23 @@ export async function build(options, ...args) {
    * @type {Artifact[]}
    */
   const artifacts = [];
+  /**
+   * @type {Artifact[]}
+   */
+  const sources = [];
 
   /**
    * @param {string} label
+   * @param {boolean} [sourceOnly]
    */
-  function addArtifact(label) {
+  function addArtifact(label, sourceOnly) {
     const results = knownArtifacts.filter(({ name, aliases }) => name === label || aliases?.includes(label));
     if (!results.length) {
       throw new Error(`Unknown artifact: ${label}`);
     }
 
     for (const artifact of results) {
-      const { name, dependencies } = artifact;
+      const { name, dependencies, sourceDependencies } = artifact;
       if (artifacts.some(({ name: label }) => label === name)) {
         return;
       }
@@ -436,7 +441,15 @@ export async function build(options, ...args) {
       if (dependencies) {
         dependencies.forEach(dependency => addArtifact(dependency));
       }
-      artifacts.push(artifact);
+      if (sourceDependencies) {
+        sourceDependencies.forEach(dependency => addArtifact(dependency, true));
+      }
+
+      if (sourceOnly) {
+        sources.push(artifact);
+      } else {
+        artifacts.push(artifact);
+      }
     }
   }
 
@@ -456,6 +469,17 @@ export async function build(options, ...args) {
     if (dump) {
       return;
     }
+  }
+
+  for (const source of sources) {
+    const { name, cwd, repository, commit } = source;
+    if (!repository) {
+      continue;
+    }
+
+    await runTask(`Cloning ${name}`, async () => {
+      await gitClone({ cwd, repository, commit });
+    });
   }
 
   for (const artifact of artifacts) {
@@ -506,6 +530,7 @@ export async function build(options, ...args) {
  * @property {string[]} [aliases]
  * @property {string[]} [artifacts]
  * @property {string[]} [dependencies]
+ * @property {string[]} [sourceDependencies]
  * @property {string} [buildPath]
  * @property {string} [cwd]
  * @property {string} [repository]
@@ -545,7 +570,8 @@ function getArtifacts(options) {
 
   addArtifact({
     name: "bun",
-    dependencies: ["bun-deps", "bun-old-js", "picohttpparser", "zig"],
+    dependencies: ["bun-deps", "bun-old-js"],
+    sourceDependencies: ["zig", "picohttpparser"],
     artifacts: getBunArtifacts(options),
     build: buildBun,
   });
@@ -558,14 +584,15 @@ function getArtifacts(options) {
 
   addArtifact({
     name: "bun-cpp",
-    dependencies: ["picohttpparser"],
+    sourceDependencies: ["picohttpparser", "boringssl"],
     artifacts: ["bun-cpp-objects.a"],
     build: buildBunCpp,
   });
 
   addArtifact({
     name: "bun-zig",
-    dependencies: ["zig", "bun-old-js"],
+    dependencies: ["bun-old-js"],
+    sourceDependencies: ["zig"],
     artifacts: ["bun-zig.o"],
     build: buildBunZig,
   });
