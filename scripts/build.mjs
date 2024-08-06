@@ -827,8 +827,9 @@ async function linkBun(options) {
     await Promise.all(
       ["zig", "cpp", "link"].map(name =>
         buildkiteDownloadArtifact({
-          step: `${os}-${arch}-build-${name}`, // Defined in .buildkite/ci.yml
-          cwd: join(basePath, name),
+          // Defined in .buildkite/ci.yml
+          step: `${os}-${arch}-build-${name === "link" ? "bun" : name}`,
+          cwd: join(basePath, `bun-${name}`),
         }),
       ),
     );
