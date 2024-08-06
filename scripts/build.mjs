@@ -963,20 +963,20 @@ async function cmakeGenerateBunBuild(options, target) {
     const zigPath = join(baseBuildPath, "bun-zig");
     const zigObjectPath = join(zigPath, "bun-zig.o");
 
-    flags.push(`-DBUN_ZIG_OBJ=${zigObjectPath}`);
+    flags.push(`-DBUN_ZIG_OBJ=${getCmakePath(zigObjectPath)}`);
   }
 
   const cppPath = join(baseBuildPath, "bun-cpp");
   const cppArchivePath = join(cppPath, "bun-cpp-objects.a");
 
   if (target === "link") {
-    flags.push(`-DBUN_CPP_ARCHIVE=${cppArchivePath}`);
+    flags.push(`-DBUN_CPP_ARCHIVE=${getCmakePath(cppArchivePath)}`);
   }
 
   const depsPath = join(baseBuildPath, "bun-deps");
 
   if (!target || target === "link") {
-    flags.push(`-DBUN_DEPS_OUT_DIR=${depsPath}`);
+    flags.push(`-DBUN_DEPS_OUT_DIR=${getCmakePath(depsPath)}`);
   }
 
   await cmakeGenerateBuild(options, ...flags.filter(Boolean));
@@ -1618,6 +1618,19 @@ function getLdFlags(options) {
 }
 
 /**
+ * @param {string} path
+ * @returns {string}
+ */
+function getCmakePath(path) {
+  // clang-cl doesn't support unescaped backslashes, otherwise it fails with:
+  // Invalid character escape '\U'
+  if (os === "windows") {
+    return path.replace(/\\/g, "/");
+  }
+  return path;
+}
+
+/**
  * Gets the CMake flags for the given options.
  * @param {BuildOptions} options
  * @returns {string[]}
@@ -1626,22 +1639,9 @@ function getCmakeFlags(options) {
   const { cwd, buildPath, debug, debugSymbols, os, osxVersion } = options;
   const { cc, cxx, ar, ranlib, ld, ccache } = options;
 
-  /**
-   * @param {string} path
-   * @returns {string}
-   */
-  function cmakePath(path) {
-    // clang-cl doesn't support unescaped backslashes, otherwise it fails with:
-    // Invalid character escape '\U'
-    if (os === "windows") {
-      return path.replace(/\\/g, "/");
-    }
-    return path;
-  }
-
   const flags = [
-    `-S ${cmakePath(cwd)}`,
-    `-B ${cmakePath(buildPath)}`,
+    `-S ${getCmakePath(cwd)}`,
+    `-B ${getCmakePath(buildPath)}`,
     "-GNinja",
     "-DCMAKE_C_STANDARD=17",
     "-DCMAKE_C_STANDARD_REQUIRED=ON",
@@ -1659,7 +1659,7 @@ function getCmakeFlags(options) {
   }
 
   if (cc) {
-    flags.push(`-DCMAKE_C_COMPILER=${cmakePath(cc)}`, "-DCMAKE_C_COMPILER_WORKS=ON");
+    flags.push(`-DCMAKE_C_COMPILER=${getCmakePath(cc)}`, "-DCMAKE_C_COMPILER_WORKS=ON");
   }
 
   const cflags = getCFlags(options);
@@ -1668,7 +1668,7 @@ function getCmakeFlags(options) {
   }
 
   if (cxx) {
-    flags.push(`-DCMAKE_CXX_COMPILER=${cmakePath(cxx)}`, "-DCMAKE_CXX_COMPILER_WORKS=ON");
+    flags.push(`-DCMAKE_CXX_COMPILER=${getCmakePath(cxx)}`, "-DCMAKE_CXX_COMPILER_WORKS=ON");
   }
 
   const cxxflags = getCxxFlags(options);
@@ -1677,7 +1677,7 @@ function getCmakeFlags(options) {
   }
 
   if (ld) {
-    flags.push(`-DCMAKE_LINKER=${cmakePath(ld)}`);
+    flags.push(`-DCMAKE_LINKER=${getCmakePath(ld)}`);
   }
 
   const ldflags = getLdFlags(options);
@@ -1686,17 +1686,17 @@ function getCmakeFlags(options) {
   }
 
   if (ar) {
-    flags.push(`-DCMAKE_AR=${cmakePath(ar)}`);
+    flags.push(`-DCMAKE_AR=${getCmakePath(ar)}`);
   }
 
   if (ranlib) {
-    flags.push(`-DCMAKE_RANLIB=${cmakePath(ranlib)}`);
+    flags.push(`-DCMAKE_RANLIB=${getCmakePath(ranlib)}`);
   }
 
   if (ccache) {
     flags.push(
-      `-DCMAKE_C_COMPILER_LAUNCHER=${cmakePath(ccache)}`,
-      `-DCMAKE_CXX_COMPILER_LAUNCHER=${cmakePath(ccache)}`,
+      `-DCMAKE_C_COMPILER_LAUNCHER=${getCmakePath(ccache)}`,
+      `-DCMAKE_CXX_COMPILER_LAUNCHER=${getCmakePath(ccache)}`,
     );
   }
 
