@@ -859,7 +859,7 @@ export function listFiles(path, options = {}) {
  * @param {string} target
  */
 export function symlinkFile(source, target) {
-  if (exists(source) && fs.realpathSync(target) === source) {
+  if (exists(target) && fs.realpathSync(target) === source) {
     return;
   }
 
