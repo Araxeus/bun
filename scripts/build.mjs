@@ -821,19 +821,17 @@ async function linkBun(options) {
   }
 
   if (isBuildKite) {
-    await runTask("{dim}Downloading artifacts{reset}", async () => {
-      const { os, arch } = options;
-      const basePath = dirname(buildPath);
+    const { os, arch } = options;
+    const basePath = dirname(buildPath);
 
-      await Promise.all(
-        ["zig", "cpp", "link"].map(name =>
-          buildkiteDownloadArtifact({
-            step: `${os}-${arch}-build-${name}`, // Defined in .buildkite/ci.yml
-            cwd: join(basePath, name),
-          }),
-        ),
-      );
-    });
+    await Promise.all(
+      ["zig", "cpp", "link"].map(name =>
+        buildkiteDownloadArtifact({
+          step: `${os}-${arch}-build-${name}`, // Defined in .buildkite/ci.yml
+          cwd: join(basePath, name),
+        }),
+      ),
+    );
   }
 
   await cmakeGenerateBunBuild(options, "link");
