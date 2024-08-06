@@ -464,6 +464,9 @@ export async function build(options, ...args) {
   const { clean, dump } = options;
   if (isCI || dump) {
     await runTask("{dim}Artifacts{reset}", () => console.log(artifacts.map(({ name }) => name)));
+    if (sources.length) {
+      await runTask("{dim}Sources{reset}", () => console.log(sources.map(({ name }) => name)));
+    }
     await runTask("{dim}Options{reset}", () => console.log(options));
     await runTask("{dim}Environment{reset}", () => console.log(process.env));
     if (dump) {
@@ -571,7 +574,7 @@ function getArtifacts(options) {
   addArtifact({
     name: "bun",
     dependencies: ["bun-deps", "bun-old-js"],
-    sourceDependencies: ["zig", "picohttpparser"],
+    sourceDependencies: ["zig", "picohttpparser", "bun-deps"],
     artifacts: getBunArtifacts(options),
     build: buildBun,
   });
@@ -584,7 +587,7 @@ function getArtifacts(options) {
 
   addArtifact({
     name: "bun-cpp",
-    sourceDependencies: ["picohttpparser", "boringssl"],
+    sourceDependencies: ["picohttpparser", "bun-deps"],
     artifacts: ["bun-cpp-objects.a"],
     build: buildBunCpp,
   });
