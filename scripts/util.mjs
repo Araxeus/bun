@@ -1714,6 +1714,7 @@ export async function buildkiteDownloadArtifact(options) {
     args.push("--log-level", "debug");
   }
 
+  mkdir(cwd);
   while (retries--) {
     try {
       await spawn("buildkite-agent", args, { cwd });

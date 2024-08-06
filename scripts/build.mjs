@@ -46,6 +46,7 @@ import {
   zipFile,
   symlinkFile,
   gitClone,
+  buildkiteDownloadArtifact,
 } from "./util.mjs";
 
 async function main() {
@@ -819,6 +820,22 @@ async function linkBun(options) {
     args.push("-v");
   }
 
+  if (isBuildKite) {
+    await runTask("{dim}Downloading artifacts{reset}", async () => {
+      const { os, arch } = options;
+      const basePath = dirname(buildPath);
+
+      await Promise.all(
+        ["zig", "cpp", "link"].map(name =>
+          buildkiteDownloadArtifact({
+            step: `${os}-${arch}-build-${name}`, // Defined in .buildkite/ci.yml
+            cwd: join(basePath, name),
+          }),
+        ),
+      );
+    });
+  }
+
   await cmakeGenerateBunBuild(options, "link");
   await spawn("ninja", args, { cwd: buildPath });
   await packageBun(options);
@@ -1257,7 +1274,7 @@ async function buildLshpack(options) {
 function getMimallocArtifacts(options) {
   const { os, debug } = options;
   if (os === "windows") {
-    return ["mimalloc.lib"];
+    return ["mimalloc-static.lib"];
   }
   const name = debug ? "libmimalloc-debug" : "libmimalloc";
   return [`${name}.a`, `${name}.o`];
