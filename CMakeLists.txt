@@ -1554,7 +1554,7 @@ else()
 endif()
 
 # -- Brotli --
-if(NOT BUN_CPP_ONLY AND NOT BUN_ZIG_ONLY)
+if(NOT BUN_ZIG_ONLY)
     set(BROTLI_SRC "${CMAKE_CURRENT_SOURCE_DIR}/src/deps/brotli")
     file(GLOB BROTLI_FILES ${CONFIGURE_DEPENDS}
         "${BROTLI_SRC}/common/*.c"

@@ -899,7 +899,14 @@ export function symlinkDir(source, target) {
  */
 export async function zipFile(path, zipPath) {
   if (isWindows) {
-    throw new Error("TODO");
+    await spawn("powershell", [
+      "-NoProfile",
+      "-NonInteractive",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-Command",
+      `Compress-Archive -Path "${path}" -DestinationPath "${zipPath}" -Force`,
+    ]);
   } else {
     await spawn("zip", ["-r", zipPath, path]);
   }
