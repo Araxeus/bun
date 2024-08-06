@@ -420,33 +420,6 @@ export async function gitClone(options) {
 }
 
 /**
- * @typedef {Object} GitCloneSubmoduleOptions
- * @property {string} [cwd]
- * @property {boolean} [force]
- * @property {boolean} [recursive]
- */
-
-/**
- * Clones a git submodule.
- * @param {string} path
- * @param {GitCloneSubmoduleOptions} options
- */
-export async function gitCloneSubmodule(path, options = {}) {
-  const { cwd, recursive, force } = options;
-
-  const jobs = `${getCpus()}`;
-  const args = ["submodule", "update", "--init", "--progress", "--depth", "1", "--jobs", jobs];
-  if (recursive) {
-    args.push("--recursive");
-  }
-  if (force) {
-    args.push("--force");
-  }
-
-  await spawn("git", [...args, "--", path], { cwd, throwOnError: false });
-}
-
-/**
  * Cleans a git repository.
  * @param {string} cwd
  */
