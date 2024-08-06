@@ -1715,11 +1715,12 @@ export async function buildkiteDownloadArtifact(options) {
   }
 
   mkdir(cwd);
-  while (retries--) {
+  for (let i = retries; i > 0; i--) {
     try {
       await spawn("buildkite-agent", args, { cwd });
+      return;
     } catch (cause) {
-      if (retries === 0) {
+      if (i === 0) {
         throw cause;
       }
       emitWarning(cause);
