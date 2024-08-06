@@ -49,6 +49,57 @@ import {
   symlinkFile,
 } from "./util.mjs";
 
+async function main() {
+  process.on("uncaughtException", err => fatalError(err));
+  process.on("unhandledRejection", err => fatalError(err));
+  process.on("warning", err => emitWarning(err));
+
+  const options = getBuildOptions();
+
+  const inheritEnv = getOption({
+    name: "inherit-env",
+    description: "If environment variables from the host should be inherited",
+    type: "boolean",
+  });
+
+  const buildEnv = getBuildEnv(options);
+
+  for (const key of Object.keys(buildEnv)) {
+    const buildValue = buildEnv[key];
+    const hostValue = process.env[key];
+
+    if (hostValue && hostValue !== buildValue) {
+      emitWarning(`Environment variable has conflicting values: ${key}\n  Host: ${hostValue}\n  Build: ${buildValue}`);
+    }
+
+    // If an environment variable is set in CI, it should be used.
+    // Otherwise, it should use the build environment.
+    if (isCI) {
+      process.env[key] ||= buildValue;
+    } else {
+      process.env[key] = buildValue;
+    }
+  }
+
+  for (const key of Object.keys(process.env)) {
+    if (!inheritEnv && !(key in buildEnv) && !isSystemEnv(key)) {
+      delete process.env[key];
+    }
+  }
+
+  const noColor = getOption({
+    name: "no-color",
+    description: "If the output should be colorless",
+    type: "boolean",
+  });
+
+  process.env["FORCE_COLOR"] = noColor ? "0" : "1";
+  process.env["CLICOLOR_FORCE"] = "1";
+
+  const args = process.argv.slice(2).filter(arg => !arg.startsWith("-"));
+  await build(options, ...args);
+}
+
 /**
  * @typedef {Object} BuildOptions
  * @property {string} cwd
@@ -76,11 +127,11 @@ import {
  * @property {"read-write" | "read" | "write" | "none"} [cacheStrategy]
  */
 
-async function main() {
-  process.on("uncaughtException", err => fatalError(err));
-  process.on("unhandledRejection", err => fatalError(err));
-  process.on("warning", err => emitWarning(err));
-
+/**
+ * Gets the default build options.
+ * @returns {BuildOptions}
+ */
+export function getBuildOptions() {
   const customTarget = getOption({
     name: "target",
     description: "The target to build (e.g. bun-darwin-aarch64, bun-windows-x64-baseline)",
@@ -320,10 +371,7 @@ async function main() {
     type: "boolean",
   });
 
-  /**
-   * @type {BuildOptions}
-   */
-  const options = {
+  return {
     os,
     arch,
     baseline,
@@ -350,49 +398,6 @@ async function main() {
     cacheStrategy,
     dump,
   };
-
-  const inheritEnv = getOption({
-    name: "inherit-env",
-    description: "If environment variables from the host should be inherited",
-    type: "boolean",
-  });
-
-  const buildEnv = getBuildEnv(options);
-
-  for (const key of Object.keys(buildEnv)) {
-    const buildValue = buildEnv[key];
-    const hostValue = process.env[key];
-
-    if (hostValue && hostValue !== buildValue) {
-      emitWarning(`Environment variable has conflicting values: ${key}\n  Host: ${hostValue}\n  Build: ${buildValue}`);
-    }
-
-    // If an environment variable is set in CI, it should be used.
-    // Otherwise, it should use the build environment.
-    if (isCI) {
-      process.env[key] ||= buildValue;
-    } else {
-      process.env[key] = buildValue;
-    }
-  }
-
-  for (const key of Object.keys(process.env)) {
-    if (!inheritEnv && !(key in buildEnv) && !isSystemEnv(key)) {
-      delete process.env[key];
-    }
-  }
-
-  const noColor = getOption({
-    name: "no-color",
-    description: "If the output should be colorless",
-    type: "boolean",
-  });
-
-  process.env["FORCE_COLOR"] = noColor ? "0" : "1";
-  process.env["CLICOLOR_FORCE"] = "1";
-
-  const args = process.argv.slice(2).filter(arg => !arg.startsWith("-"));
-  await build(options, ...args);
 }
 
 /**
@@ -513,13 +518,247 @@ export async function build(options, ...args) {
 }
 
 /**
+ * @typedef {Object} Artifact
+ * @property {string} name
+ * @property {(options: BuildOptions) => Promise<void>} build
+ * @property {string[]} [aliases]
+ * @property {string[]} [artifacts]
+ * @property {string[]} [dependencies]
+ * @property {string} [buildPath]
+ * @property {string} [cwd]
+ * @property {string} [repository]
+ * @property {string} [commit]
+ */
+
+/**
+ * @param {BuildOptions} options
+ * @returns {Artifact[]}
+ */
+function getArtifacts(options) {
+  const { os, cwd, buildPath } = options;
+
+  /**
+   * @type {Artifact[]}
+   */
+  const artifacts = [];
+
+  function addArtifact(artifact) {
+    const { cwd, buildPath } = options;
+    const { repository } = artifact;
+
+    if (repository) {
+      const pwd = process.cwd();
+      if (cwd === pwd || !cwd) {
+        throw new Error(`Cannot add submodule in the current directory: ${name} in ${pwd}`);
+      }
+    }
+
+    artifacts.push({
+      cwd,
+      buildPath,
+      build: () => {},
+      ...artifact,
+    });
+  }
+
+  addArtifact({
+    name: "bun",
+    dependencies: ["bun-deps", "bun-old-js"],
+    artifacts: getBunArtifacts(options),
+    build: buildBun,
+  });
+
+  addArtifact({
+    name: "bun-link",
+    aliases: ["link"],
+    artifacts: getBunArtifacts(options),
+    build: linkBun,
+  });
+
+  addArtifact({
+    name: "bun-cpp",
+    aliases: ["cpp"],
+    artifacts: ["bun-cpp-objects.a"],
+    build: buildBunCpp,
+  });
+
+  addArtifact({
+    name: "bun-zig-submodule",
+    aliases: ["zig-submodule"],
+    repository: "https://github.com/oven-sh/zig.git",
+    commit: "4c283af60cdae205df5a872530c77e2a6a307d43",
+    cwd: join(cwd, "src", "deps", "zig"),
+  });
+
+  addArtifact({
+    name: "bun-zig",
+    aliases: ["zig"],
+    dependencies: ["bun-zig-submodule", "bun-old-js"],
+    artifacts: ["bun-zig.o"],
+    build: buildBunZig,
+  });
+
+  addArtifact({
+    name: "bun-node-fallbacks",
+    aliases: ["node-fallbacks", "bun-old-js", "old-js"],
+    cwd: join(cwd, "src", "node-fallbacks"),
+    build: buildBunNodeFallbacks,
+  });
+
+  addArtifact({
+    name: "bun-error",
+    aliases: ["bun-old-js", "old-js"],
+    cwd: join(cwd, "packages", "bun-error"),
+    build: buildBunError,
+  });
+
+  addArtifact({
+    name: "bun-fallback-decoder",
+    aliases: ["fallback-decoder", "bun-old-js", "old-js"],
+    build: buildBunFallbackDecoder,
+  });
+
+  addArtifact({
+    name: "bun-runtime-js",
+    aliases: ["runtime-js", "bun-old-js", "old-js"],
+    build: buildBunRuntimeJs,
+  });
+
+  addArtifact({
+    name: "bun-webkit",
+    aliases: ["webkit"],
+    repository: "https://github.com/oven-sh/WebKit.git",
+    commit: "13bb88da0b791154dca60910f301dcd70c321f72",
+    cwd: join(cwd, "src", "bun.js", "WebKit"),
+  });
+
+  const depsPath = join(cwd, "src", "deps");
+  const depsOutPath = join(buildPath, "bun-deps");
+
+  /**
+   * @param {Artifact} artifact
+   */
+  function addDependency(artifact) {
+    const { name, aliases = [] } = artifact;
+
+    addArtifact({
+      cwd: join(depsPath, name),
+      artifactsPath: depsOutPath,
+      ...artifact,
+      aliases: [...aliases, "bun-deps", "deps"],
+    });
+  }
+
+  addDependency({
+    name: "boringssl",
+    repository: "https://github.com/oven-sh/boringssl.git",
+    commit: "29a2cd359458c9384694b75456026e4b57e3e567",
+    artifacts: getBoringSslArtifacts(options),
+    build: buildBoringSsl,
+  });
+
+  addDependency({
+    name: "cares",
+    aliases: ["c-ares"],
+    repository: "https://github.com/c-ares/c-ares.git",
+    commit: "d1722e6e8acaf10eb73fa995798a9cd421d9f85e",
+    artifacts: getCaresArtifacts(options),
+    build: buildCares,
+  });
+
+  addDependency({
+    name: "libarchive",
+    repository: "https://github.com/libarchive/libarchive.git",
+    commit: "898dc8319355b7e985f68a9819f182aaed61b53a",
+    artifacts: getLibarchiveArtifacts(options),
+    build: buildLibarchive,
+  });
+
+  addDependency({
+    name: "libdeflate",
+    repository: "https://github.com/ebiggers/libdeflate.git",
+    commit: "dc76454a39e7e83b68c3704b6e3784654f8d5ac5",
+    artifacts: getLibdeflateArtifacts(options),
+    build: buildLibdeflate,
+  });
+
+  addDependency({
+    name: "lolhtml",
+    aliases: ["lol-html"],
+    repository: "https://github.com/cloudflare/lol-html.git",
+    commit: "8d4c273ded322193d017042d1f48df2766b0f88b",
+    artifacts: getLolhtmlArtifacts(options),
+    build: buildLolhtml,
+  });
+
+  addDependency({
+    name: "lshpack",
+    aliases: ["ls-hpack"],
+    repository: "https://github.com/litespeedtech/ls-hpack.git",
+    commit: "3d0f1fc1d6e66a642e7a98c55deb38aa986eb4b0",
+    artifacts: getLshpackArtifacts(options),
+    build: buildLshpack,
+  });
+
+  addDependency({
+    name: "mimalloc",
+    repository: "https://github.com/oven-sh/mimalloc.git",
+    commit: "4c283af60cdae205df5a872530c77e2a6a307d43",
+    artifacts: getMimallocArtifacts(options),
+    build: buildMimalloc,
+  });
+
+  addDependency({
+    name: "tinycc",
+    repository: "https://github.com/oven-sh/tinycc.git",
+    commit: "ab631362d839333660a265d3084d8ff060b96753",
+    artifacts: getTinyccArtifacts(options),
+    build: buildTinycc,
+  });
+
+  addDependency({
+    name: "zlib",
+    repository: "https://github.com/cloudflare/zlib.git",
+    commit: "886098f3f339617b4243b286f5ed364b9989e245",
+    artifacts: getZlibArtifacts(options),
+    build: buildZlib,
+  });
+
+  addDependency({
+    name: "zstd",
+    repository: "https://github.com/facebook/zstd.git",
+    commit: "794ea1b0afca0f020f4e57b6732332231fb23c70",
+    artifacts: getZstdArtifacts(options),
+    build: buildZstd,
+  });
+
+  addDependency({
+    name: "picohttpparser",
+    repository: "https://github.com/h2o/picohttpparser.git",
+    commit: "066d2b1e9ab820703db0837a7255d92d30f0c9f5",
+  });
+
+  if (os === "windows") {
+    addDependency({
+      name: "libuv",
+      artifacts: getLibuvArtifacts(options),
+      build: buildLibuv,
+      repository: "https://github.com/libuv/libuv.git",
+      commit: "da527d8d2a908b824def74382761566371439003",
+    });
+  }
+
+  return artifacts;
+}
+
+/**
  * Build bun.
  */
 
 /**
  * @param {BuildOptions} options
  */
-async function bunZigBuild(options) {
+async function buildBunZig(options) {
   const { buildPath, jobs } = options;
   const zigObjectPath = join(buildPath, "bun-zig.o");
   const args = ["-j", `${jobs}`];
@@ -541,7 +780,7 @@ async function bunZigBuild(options) {
 /**
  * @param {BuildOptions} options
  */
-async function bunCppBuild(options) {
+async function buildBunCpp(options) {
   const { buildPath, os, jobs } = options;
 
   const shell = os === "windows" ? "pwsh" : "bash";
@@ -559,7 +798,7 @@ async function bunCppBuild(options) {
 /**
  * @param {BuildOptions} options
  */
-async function bunLinkBuild(options) {
+async function linkBun(options) {
   const { buildPath, jobs } = options;
   const args = ["-j", `${jobs}`];
   if (isVerbose) {
@@ -568,13 +807,13 @@ async function bunLinkBuild(options) {
 
   await cmakeGenerateBunBuild(options, "link");
   await spawn("ninja", args, { cwd: buildPath });
-  await bunZip(options);
+  await packageBun(options);
 }
 
 /**
  * @param {BuildOptions} options
  */
-async function bunBuild(options) {
+async function buildBun(options) {
   const { buildPath, jobs } = options;
   const args = ["-j", `${jobs}`];
   if (isVerbose) {
@@ -584,35 +823,14 @@ async function bunBuild(options) {
   await bunCloneSubmodules(options);
   await cmakeGenerateBunBuild(options);
   await spawn("ninja", args, { cwd: buildPath });
-  await bunZip(options);
-}
-
-/**
- * @param {BuildOptions} options
- * @returns {string[]}
- */
-function bunArtifacts(options) {
-  const { debug, target } = options;
-
-  let artifacts;
-  if (debug) {
-    artifacts = ["bun-debug"];
-  } else {
-    artifacts = ["bun", "bun-profile"];
-  }
-
-  if (isCI) {
-    return artifacts.map(name => `${name.replace("bun", target)}.zip`);
-  }
-
-  return artifacts;
+  await packageBun(options);
 }
 
 /**
  * Creates a zip file for the given build.
  * @param {BuildOptions} options
  */
-async function bunZip(options) {
+async function packageBun(options) {
   const { buildPath, debug, os, target } = options;
   const names = debug ? ["bun-debug"] : ["bun", "bun-profile"];
 
@@ -656,6 +874,27 @@ async function bunZip(options) {
 
     print(`Built ${name} {yellow}v${revision.trim()}{reset}`);
   }
+}
+
+/**
+ * @param {BuildOptions} options
+ * @returns {string[]}
+ */
+function getBunArtifacts(options) {
+  const { debug, target } = options;
+
+  let artifacts;
+  if (debug) {
+    artifacts = ["bun-debug"];
+  } else {
+    artifacts = ["bun", "bun-profile"];
+  }
+
+  if (isCI) {
+    return artifacts.map(name => `${name.replace("bun", target)}.zip`);
+  }
+
+  return artifacts;
 }
 
 /**
@@ -730,7 +969,7 @@ async function cmakeGenerateBunBuild(options, target) {
 /**
  * @param {BuildOptions} options
  */
-async function bunRuntimeJsBuild(options) {
+async function buildBunRuntimeJs(options) {
   const { cwd, clean } = options;
   const srcPath = join(cwd, "src", "runtime.bun.js");
   const outPath = join(cwd, "src", "runtime.out.js");
@@ -757,7 +996,7 @@ async function bunRuntimeJsBuild(options) {
 /**
  * @param {BuildOptions} options
  */
-async function bunFallbackDecoderBuild(options) {
+async function buildBunFallbackDecoder(options) {
   const { cwd, clean } = options;
   const srcPath = join(cwd, "src", "fallback.ts");
   const outPath = join(cwd, "src", "fallback.out.js");
@@ -784,7 +1023,7 @@ async function bunFallbackDecoderBuild(options) {
 /**
  * @param {BuildOptions} options
  */
-async function bunErrorBuild(options) {
+async function buildBunError(options) {
   const { cwd, clean } = options;
   const outPath = join(cwd, "dist");
 
@@ -811,7 +1050,7 @@ async function bunErrorBuild(options) {
 /**
  * @param {BuildOptions} options
  */
-async function bunNodeFallbacksBuild(options) {
+async function buildBunNodeFallbacks(options) {
   const { cwd, clean } = options;
   const outPath = join(cwd, "out");
 
@@ -831,173 +1070,10 @@ async function bunNodeFallbacksBuild(options) {
  */
 
 /**
- * @typedef {Object} Artifact
- * @property {string} name
- * @property {string[]} [aliases]
- * @property {string} [cwd]
- * @property {string[]} [artifacts]
- * @property {Function} build
- * @property {string[]} [dependencies]
- */
-
-/**
- * @param {BuildOptions} options
- * @returns {Artifact[]}
- */
-function getArtifacts(options) {
-  const { os, cwd, buildPath } = options;
-  const depsPath = join(cwd, "src", "deps");
-  const depsOutPath = join(buildPath, "bun-deps");
-
-  const artifacts = [
-    {
-      name: "bun",
-      dependencies: ["bun-deps", "bun-error", "bun-node-fallbacks", "bun-fallback-decoder", "bun-runtime-js"],
-      build: bunBuild,
-      artifacts: bunArtifacts(options),
-    },
-    {
-      name: "bun-link",
-      aliases: ["link"],
-      build: bunLinkBuild,
-      artifacts: bunArtifacts(options),
-    },
-    {
-      name: "bun-cpp",
-      aliases: ["cpp"],
-      build: bunCppBuild,
-      artifacts: ["bun-cpp-objects.a"],
-    },
-    {
-      name: "bun-zig",
-      aliases: ["zig"],
-      dependencies: ["bun-error", "bun-node-fallbacks", "bun-fallback-decoder", "bun-runtime-js"],
-      build: bunZigBuild,
-      artifacts: ["bun-zig.o"],
-    },
-    {
-      name: "bun-node-fallbacks",
-      aliases: ["node-fallbacks", "bun-old-js", "old-js"],
-      cwd: join(cwd, "src", "node-fallbacks"),
-      build: bunNodeFallbacksBuild,
-    },
-    {
-      name: "bun-error",
-      aliases: ["bun-old-js", "old-js"],
-      cwd: join(cwd, "packages", "bun-error"),
-      build: bunErrorBuild,
-    },
-    {
-      name: "bun-fallback-decoder",
-      aliases: ["fallback-decoder", "bun-old-js", "old-js"],
-      build: bunFallbackDecoderBuild,
-    },
-    {
-      name: "bun-runtime-js",
-      aliases: ["runtime-js", "bun-old-js", "old-js"],
-      build: bunRuntimeJsBuild,
-    },
-    {
-      name: "boringssl",
-      aliases: ["bun-deps", "deps"],
-      cwd: join(depsPath, "boringssl"),
-      artifacts: boringSslArtifacts(options),
-      artifactsPath: depsOutPath,
-      build: boringSslBuild,
-    },
-    {
-      name: "cares",
-      aliases: ["c-ares", "bun-deps", "deps"],
-      cwd: join(depsPath, "c-ares"),
-      artifacts: caresArtifacts(options),
-      artifactsPath: depsOutPath,
-      build: caresBuild,
-    },
-    {
-      name: "libarchive",
-      aliases: ["bun-deps", "deps"],
-      cwd: join(depsPath, "libarchive"),
-      artifacts: libarchiveArtifacts(options),
-      artifactsPath: depsOutPath,
-      build: libarchiveBuild,
-    },
-    {
-      name: "libdeflate",
-      aliases: ["bun-deps", "deps"],
-      cwd: join(depsPath, "libdeflate"),
-      artifacts: libdeflateArtifacts(options),
-      artifactsPath: depsOutPath,
-      build: libdeflateBuild,
-    },
-    {
-      name: "lolhtml",
-      aliases: ["lol-html", "bun-deps", "deps"],
-      cwd: join(depsPath, "lol-html"),
-      artifacts: lolhtmlArtifacts(options),
-      artifactsPath: depsOutPath,
-      build: lolhtmlBuild,
-    },
-    {
-      name: "lshpack",
-      aliases: ["ls-hpack", "bun-deps", "deps"],
-      cwd: join(depsPath, "ls-hpack"),
-      artifacts: lshpackArtifacts(options),
-      artifactsPath: depsOutPath,
-      build: lshpackBuild,
-    },
-    {
-      name: "mimalloc",
-      aliases: ["bun-deps", "deps"],
-      cwd: join(depsPath, "mimalloc"),
-      artifacts: mimallocArtifacts(options),
-      artifactsPath: depsOutPath,
-      build: mimallocBuild,
-    },
-    {
-      name: "tinycc",
-      aliases: ["bun-deps", "deps"],
-      cwd: join(depsPath, "tinycc"),
-      artifacts: tinyccArtifacts(options),
-      artifactsPath: depsOutPath,
-      build: tinyccBuild,
-    },
-    {
-      name: "zlib",
-      aliases: ["bun-deps", "deps"],
-      cwd: join(depsPath, "zlib"),
-      artifacts: zlibArtifacts(options),
-      artifactsPath: depsOutPath,
-      build: zlibBuild,
-    },
-    {
-      name: "zstd",
-      aliases: ["bun-deps", "deps"],
-      cwd: join(depsPath, "zstd"),
-      artifacts: zstdArtifacts(options),
-      artifactsPath: depsOutPath,
-      build: zstdBuild,
-    },
-  ];
-
-  if (os === "windows") {
-    artifacts.push({
-      name: "libuv",
-      aliases: ["bun-deps"],
-      cwd: join(depsPath, "libuv"),
-      artifacts: libuvArtifacts(options),
-      artifactsPath: depsOutPath,
-      build: libuvBuild,
-    });
-  }
-
-  return artifacts;
-}
-
-/**
  * @param {BuildOptions} options
  * @returns {string[]}
  */
-function boringSslArtifacts(options) {
+function getBoringSslArtifacts(options) {
   const { os } = options;
   if (os === "windows") {
     return ["crypto.lib", "ssl.lib", "decrepit.lib"];
@@ -1008,7 +1084,7 @@ function boringSslArtifacts(options) {
 /**
  * @param {BuildOptions} options
  */
-async function boringSslBuild(options) {
+async function buildBoringSsl(options) {
   await cmakeGenerateBuild(options);
   await cmakeBuild(options, ...boringSslArtifacts(options));
 }
@@ -1017,7 +1093,7 @@ async function boringSslBuild(options) {
  * @param {BuildOptions} options
  * @returns {string[]}
  */
-function caresArtifacts(options) {
+function getCaresArtifacts(options) {
   const libPath = "lib";
   const { os } = options;
   if (os === "windows") {
@@ -1029,7 +1105,7 @@ function caresArtifacts(options) {
 /**
  * @param {BuildOptions} options
  */
-async function caresBuild(options) {
+async function buildCares(options) {
   await cmakeGenerateBuild(
     { ...options, pic: true },
     "-DCARES_STATIC=ON",
@@ -1043,7 +1119,7 @@ async function caresBuild(options) {
  * @param {BuildOptions} options
  * @returns {string[]}
  */
-function libarchiveArtifacts(options) {
+function getLibarchiveArtifacts(options) {
   const { os } = options;
   const libPath = "libarchive";
   if (os === "windows") {
@@ -1055,7 +1131,7 @@ function libarchiveArtifacts(options) {
 /**
  * @param {BuildOptions} options
  */
-async function libarchiveBuild(options) {
+async function buildLibarchive(options) {
   await cmakeGenerateBuild(
     { ...options, pic: true },
     "-DBUILD_SHARED_LIBS=0",
@@ -1087,7 +1163,7 @@ async function libarchiveBuild(options) {
  * @param {BuildOptions} options
  * @returns {string[]}
  */
-function libdeflateArtifacts(options) {
+function getLibdeflateArtifacts(options) {
   const { os } = options;
   if (os === "windows") {
     return ["deflatestatic.lib"];
@@ -1098,7 +1174,7 @@ function libdeflateArtifacts(options) {
 /**
  * @param {BuildOptions} options
  */
-async function libdeflateBuild(options) {
+async function buildLibdeflate(options) {
   await cmakeGenerateBuild(
     options,
     "-DLIBDEFLATE_BUILD_STATIC_LIB=ON",
@@ -1112,7 +1188,7 @@ async function libdeflateBuild(options) {
  * @param {BuildOptions} options
  * @returns {string[]}
  */
-function libuvArtifacts(options) {
+function getLibuvArtifacts(options) {
   const { os } = options;
   if (os === "windows") {
     return ["libuv.lib"];
@@ -1123,13 +1199,7 @@ function libuvArtifacts(options) {
 /**
  * @param {BuildOptions} options
  */
-async function libuvBuild(options) {
-  const { cwd } = options;
-  await gitClone({
-    cwd,
-    url: "https://github.com/libuv/libuv",
-    commit: "da527d8d2a908b824def74382761566371439003",
-  });
+async function buildLibuv(options) {
   await cmakeGenerateBuild(options, "-DCMAKE_C_FLAGS=/DWIN32 /D_WINDOWS -Wno-int-conversion");
   await cmakeBuild(options);
 }
@@ -1138,7 +1208,7 @@ async function libuvBuild(options) {
  * @param {BuildOptions} options
  * @returns {string[]}
  */
-function lolhtmlArtifacts(options) {
+function getLolhtmlArtifacts(options) {
   const target = getRustTarget(options);
   const { os, debug } = options;
   const targetPath = join(target, debug ? "debug" : "release");
@@ -1151,7 +1221,7 @@ function lolhtmlArtifacts(options) {
 /**
  * @param {BuildOptions} options
  */
-async function lolhtmlBuild(options) {
+async function buildLolhtml(options) {
   const { cwd } = options;
   const srcPath = join(cwd, "c-api");
   await cargoBuild({ ...options, cwd: srcPath });
@@ -1161,7 +1231,7 @@ async function lolhtmlBuild(options) {
  * @param {BuildOptions} options
  * @returns {string[]}
  */
-function lshpackArtifacts(options) {
+function getLshpackArtifacts(options) {
   const { os } = options;
   if (os === "windows") {
     return ["ls-hpack.lib"];
@@ -1172,7 +1242,7 @@ function lshpackArtifacts(options) {
 /**
  * @param {BuildOptions} options
  */
-async function lshpackBuild(options) {
+async function buildLshpack(options) {
   // FIXME: There is a linking issue with lshpack built in debug mode or debug symbols
   await cmakeGenerateBuild({ ...options, debug: false, debugSymbols: false }, "-DLSHPACK_XXH=ON", "-DSHARED=0");
   await cmakeBuild(options, ...lshpackArtifacts(options));
@@ -1182,7 +1252,7 @@ async function lshpackBuild(options) {
  * @param {BuildOptions} options
  * @returns {string[]}
  */
-function mimallocArtifacts(options) {
+function getMimallocArtifacts(options) {
   const { os, debug } = options;
   if (os === "windows") {
     return ["mimalloc.lib"];
@@ -1194,7 +1264,7 @@ function mimallocArtifacts(options) {
 /**
  * @param {BuildOptions} options
  */
-async function mimallocBuild(options) {
+async function buildMimalloc(options) {
   const { os, debug, valgrind, buildPath } = options;
   const flags = [
     "-DMI_SKIP_COLLECT_ON_EXIT=1",
@@ -1227,7 +1297,7 @@ async function mimallocBuild(options) {
  * @param {BuildOptions} options
  * @returns {string[]}
  */
-function tinyccArtifacts(options) {
+function getTinyccArtifacts(options) {
   const { os } = options;
   if (os === "windows") {
     return ["tcc.lib"];
@@ -1238,7 +1308,7 @@ function tinyccArtifacts(options) {
 /**
  * @param {BuildOptions} options
  */
-async function tinyccBuild(options) {
+async function buildTinycc(options) {
   const { os, cwd, buildPath, cc, ccache, ar, debug, clean, jobs } = options;
 
   // tinycc doesn't support out-of-source builds, so we need to copy the source
@@ -1334,7 +1404,7 @@ async function tinyccBuild(options) {
  * @param {BuildOptions} options
  * @returns {string[]}
  */
-function zlibArtifacts(options) {
+function getZlibArtifacts(options) {
   const { os } = options;
   if (os === "windows") {
     return ["zlib.lib"];
@@ -1345,7 +1415,7 @@ function zlibArtifacts(options) {
 /**
  * @param {BuildOptions} options
  */
-async function zlibBuild(options) {
+async function buildZlib(options) {
   const { os, cwd } = options;
 
   // TODO: Make a patch to zlib for clang-cl, which implements `__builtin_ctzl` and `__builtin_expect`
@@ -1368,7 +1438,7 @@ async function zlibBuild(options) {
  * @param {BuildOptions} options
  * @returns {string[]}
  */
-function zstdArtifacts(options) {
+function getZstdArtifacts(options) {
   const { os } = options;
   const libPath = "lib";
   if (os === "windows") {
@@ -1380,7 +1450,7 @@ function zstdArtifacts(options) {
 /**
  * @param {BuildOptions} options
  */
-async function zstdBuild(options) {
+async function buildZstd(options) {
   const { cwd } = options;
   const cmakePath = join(cwd, "build", "cmake");
   await cmakeGenerateBuild({ ...options, cwd: cmakePath }, "-DZSTD_BUILD_STATIC=ON");
