@@ -866,13 +866,11 @@ async function packageBun(options) {
   for (const name of names) {
     const exe = os === "windows" ? `${name}.exe` : name;
 
-    let artifacts;
+    const artifacts = [exe];
     if (os === "windows") {
-      artifacts = [exe, `${exe}.pdb`];
+      artifacts.push("bun.pdb");
     } else if (os === "darwin" && !debug) {
-      artifacts = [exe, `${exe}.dSYM`];
-    } else {
-      artifacts = [exe];
+      artifacts.push("bun-profile.dSYM");
     }
 
     for (const artifact of artifacts) {
