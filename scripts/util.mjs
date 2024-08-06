@@ -1710,7 +1710,7 @@ export async function buildkiteDownloadArtifact(options) {
   const { step, filename, cwd, retries = 5 } = options;
 
   const args = ["artifact", "download", "--step", step, filename || "**", "."];
-  if (isVerbose || !retries) {
+  if (isDebug) {
     args.push("--log-level", "debug");
   }
 

@@ -825,10 +825,10 @@ async function linkBun(options) {
     const basePath = dirname(buildPath);
 
     await Promise.all(
-      ["zig", "cpp", "link"].map(name =>
+      ["zig", "cpp", "deps"].map(name =>
         buildkiteDownloadArtifact({
           // Defined in .buildkite/ci.yml
-          step: `${os}-${arch}-build-${name === "link" ? "bun" : name}`,
+          step: `${os}-${arch}-build-${name}`,
           cwd: join(basePath, `bun-${name}`),
         }),
       ),
