@@ -427,10 +427,14 @@ export async function gitClone(options) {
       }
     }
     {
-      const { exitCode } = await spawn("git", ["-c", "advice.detachedHead=false", "switch", "--force", "FETCH_HEAD"], {
-        cwd,
-        throwOnError: false,
-      });
+      const { exitCode } = await spawn(
+        "git",
+        ["-c", "advice.detachedHead=false", "checkout", "--force", "FETCH_HEAD"],
+        {
+          cwd,
+          throwOnError: false,
+        },
+      );
       if (exitCode !== 0) {
         return false;
       }
