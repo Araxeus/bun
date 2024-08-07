@@ -874,46 +874,89 @@ async function buildBun(options) {
  */
 async function packageBun(options) {
   const { cwd, buildPath, debug, os, target } = options;
-  const names = debug ? ["bun-debug"] : os === "windows" ? ["bun"] : ["bun", "bun-profile"];
 
-  for (const name of names) {
-    const exe = os === "windows" ? `${name}.exe` : name;
+  /**
+   * @param {"bun" | "bun-profile" | "bun-debug"} label
+   */
+  async function packageBunZip(label) {
+    // e.g. "bun" -> "bun-darwin-x64"
+    //      "bun-profile" -> "bun-darwin-x64-baseline-profile"
+    const name = label.replace("bun", target);
+    const packagePath = join(buildPath, name);
+    mkdir(packagePath, { clean: true });
 
-    const artifacts = [exe];
-    if (os === "windows") {
-      artifacts.push("bun.pdb");
-    } else if (os === "darwin" && !debug) {
-      // FIXME: artifacts.push("bun-profile.dSYM");
-    }
-
-    for (const artifact of artifacts) {
-      const artifactPath = join(buildPath, artifact);
-      if (!isFile(artifactPath)) {
-        throw new Error(`Artifact not found: ${artifactPath}`);
-      }
-    }
-
-    const exePath = join(buildPath, exe);
+    // e.g. "bun-darwin-x64-profile" -> "bun-darwin-x64-profile/bun-profile"
+    //      "windows-x64-debug" -> "windows-x64-debug/bun-debug.exe"
+    const exe = os === "windows" ? `${label}.exe` : label;
+    const exePath = join(packagePath, exe);
+    const srcPath = join(buildPath, os === "windows" ? "bun.exe" : label);
+    copyFile(srcPath, exePath);
     chmod(exePath, 0o755);
-    const { stdout: revision } = await spawn(exePath, ["--revision"], { silent: true });
 
-    if (isCI) {
-      const label = name.replace("bun", target);
-      const targetPath = join(buildPath, label);
-      mkdir(targetPath, { clean: true });
-      for (const artifact of artifacts) {
-        copyFile(join(buildPath, artifact), join(targetPath, artifact));
+    // Sanity check the build by running it with --revision.
+    await spawn(exePath, ["--revision"]);
+
+    // For profile and debug builds, create a features.json file that contains
+    // the features that were enabled at build time. This is downloaded by the bun.report
+    // service to decode crash reports from this build.
+    if (label !== "bun") {
+      const featuresPath = join(buildPath, "features.json");
+      const { stdout: featuresJson } = await spawn(
+        exePath,
+        ["--print", "JSON.stringify(require('bun:internal-for-testing').crash_handler.getFeatureData())"],
+        {
+          env: {
+            ...process.env,
+            NO_COLOR: "1",
+            BUN_FEATURE_FLAG_INTERNAL_FOR_TESTING: "1",
+          },
+        },
+      );
+      try {
+        JSON.parse(featuresJson);
+      } catch (cause) {
+        throw new Error(`Invalid features.json: ${featuresJson}`, { cause });
       }
-
-      const zipPath = join(buildPath, `${label}.zip`);
-      await zipFile(targetPath, zipPath);
-      removeFile(targetPath);
-    } else {
-      symlinkFile(exePath, join(cwd, "build", exe));
+      writeFile(featuresPath, featuresJson);
     }
 
-    print(`Built ${name} {yellow}v${revision.trim()}{reset}`);
+    // For non-release Windows builds, copy the .pdb file for debug symbols.
+    // This is also needed by the bun.report service to decode crash reports.
+    if (os === "windows" && label !== "bun") {
+      copyFile(join(buildPath, "bun.pdb"), join(packagePath, "bun.pdb"));
+    }
+
+    // e.g. "bun-darwin-x64-profile.zip" that contains:
+    //         "bun-darwin-x64-profile/bun-profile"
+    //         "bun-darwin-x64-profile/features.json"
+    const packageZipPath = join(buildPath, `${name}.zip`);
+    await zipFile(packagePath, packageZipPath);
+    removeFile(packagePath);
   }
+
+  /**
+   * @param {"bun" | "bun-profile" | "bun-debug"} label
+   * @returns {string}
+   */
+  async function prepareBun(label) {
+    const exePath = join(buildPath, os === "windows" ? "bun.exe" : label);
+    if (!isFile(exePath)) {
+      throw new Error(`Executable not found: ${exePath}`);
+    }
+
+    // Sanity check the build by running it with --revision
+    chmod(exePath, 0o755);
+    await spawn(exePath, ["--revision"]);
+
+    // Create an easy-to-access symlink to the build
+    // e.g. "build/bun-debug" -> "build/debug/bun-darwin-x64/bun/bun"
+    //      "build/bun.exe" -> "build/release/bun-windows-x64-baseline/bun/bun.exe"
+    const exe = os === "windows" ? `${label}.exe` : label;
+    symlinkFile(exePath, join(cwd, "build", exe));
+  }
+
+  const labels = debug ? ["bun-debug"] : ["bun", "bun-profile"];
+  await Promise.all(labels.map(isCI ? packageBunZip : prepareBun));
 }
 
 /**
@@ -923,20 +966,20 @@ async function packageBun(options) {
 function getBunArtifacts(options) {
   const { os, debug, target } = options;
 
-  let artifacts;
-  if (debug) {
-    artifacts = ["bun-debug"];
-  } else if (os === "windows") {
-    artifacts = ["bun"];
-  } else {
-    artifacts = ["bun", "bun-profile"];
-  }
-
   if (isCI) {
-    return artifacts.map(name => `${name.replace("bun", target)}.zip`);
+    const names = debug ? ["bun-debug"] : ["bun", "bun-profile"];
+    return names.map(name => `${name.replace("bun", target)}.zip`);
   }
 
-  return artifacts;
+  if (os === "windows") {
+    return ["bun.exe"];
+  }
+
+  if (debug) {
+    return ["bun-debug"];
+  }
+
+  return ["bun", "bun-profile"];
 }
 
 /**

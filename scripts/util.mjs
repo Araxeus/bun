@@ -6,7 +6,7 @@
 
 import * as cp from "node:child_process";
 import * as fs from "node:fs";
-import path, { dirname, normalize, relative } from "node:path";
+import path, { basename, dirname, normalize, relative } from "node:path";
 import { normalize as normalizeWindows } from "node:path/win32";
 import { hostname, tmpdir, release } from "node:os";
 import { inspect } from "node:util";
@@ -907,17 +907,25 @@ export function symlinkDir(source, target) {
  * @param {string} zipPath
  */
 export async function zipFile(path, zipPath) {
+  const cwd = dirname(path);
+  const src = basename(path);
+  removeFile(zipPath);
+
   if (isWindows) {
-    await spawn("powershell", [
-      "-NoProfile",
-      "-NonInteractive",
-      "-ExecutionPolicy",
-      "Bypass",
-      "-Command",
-      `Compress-Archive -Path "${path}" -DestinationPath "${zipPath}" -Force`,
-    ]);
+    await spawn(
+      "powershell",
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-Command",
+        `Compress-Archive -Path "${src}" -DestinationPath "${zipPath}" -Force`,
+      ],
+      { cwd },
+    );
   } else {
-    await spawn("zip", ["-r", zipPath, path]);
+    await spawn("zip", ["-r", zipPath, src], { cwd });
   }
 
   if (!isFile(zipPath)) {
