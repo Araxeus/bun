@@ -47,9 +47,6 @@ import {
   symlinkFile,
   gitClone,
   buildkiteDownloadArtifact,
-  getGitUrl,
-  sanitizePath,
-  getGitBranch,
 } from "./util.mjs";
 
 async function main() {
@@ -666,6 +663,14 @@ function getArtifacts(options) {
   });
 
   addDependency({
+    name: "brotli",
+    repository: "https://github.com/google/brotli.git",
+    commit: "ed738e842d2fbdf2d6459e39267a633c4a9b2f5d",
+    artifacts: getBrotliArtifacts(options),
+    build: buildBrotli,
+  });
+
+  addDependency({
     name: "c-ares",
     aliases: ["cares"],
     repository: "https://github.com/c-ares/c-ares.git",
@@ -1162,6 +1167,32 @@ function getBoringSslArtifacts(options) {
 async function buildBoringSsl(options) {
   await cmakeGenerateBuild(options);
   await cmakeBuild(options, ...getBoringSslArtifacts(options));
+}
+
+/**
+ * @param {BuildOptions} options
+ * @returns {string[]}
+ */
+function getBrotliArtifacts(options) {
+  const { os } = options;
+  if (os === "windows") {
+    return ["brotlicommon.lib", "brotlidec.lib", "brotlienc.lib"];
+  }
+  return ["libbrotlicommon.a", "libbrotlidec.a", "libbrotlienc.a"];
+}
+
+/**
+ * @param {BuildOptions} options
+ */
+async function buildBrotli(options) {
+  await cmakeGenerateBuild(
+    options,
+    "-DBUILD_SHARED_LIBS=OFF",
+    "-DBROTLI_BUILD_TOOLS=OFF",
+    "-DBROTLI_DISABLE_TESTS=ON",
+    "-DBROTLI_EMSCRIPTEN=OFF",
+  );
+  await cmakeBuild(options, "brotlicommon", "brotlidec", "brotlienc");
 }
 
 /**
@@ -1695,7 +1726,7 @@ function getCmakePath(path) {
  * @returns {string[]}
  */
 function getCmakeFlags(options) {
-  const { cwd, buildPath, debug, debugSymbols, os, osxVersion } = options;
+  const { cwd, buildPath, debug, debugSymbols, os, osxVersion, clean } = options;
   const { cc, cxx, ar, ranlib, ld, ccache } = options;
 
   const flags = [
@@ -1708,6 +1739,10 @@ function getCmakeFlags(options) {
     "-DCMAKE_CXX_STANDARD_REQUIRED=ON",
     "-DCMAKE_COLOR_DIAGNOSTICS=ON",
   ];
+
+  if (clean) {
+    flags.push("--fresh");
+  }
 
   if (debug) {
     flags.push("-DCMAKE_BUILD_TYPE=Debug");

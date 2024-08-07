@@ -320,6 +320,7 @@ option(USE_CUSTOM_LOLHTML "Use Bun's recommended version of lolhtml" ON)
 option(USE_CUSTOM_TINYCC "Use Bun's recommended version of tinycc" ON)
 option(USE_CUSTOM_LIBUV "Use Bun's recommended version of libuv (Windows only)" ON)
 option(USE_CUSTOM_LSHPACK "Use Bun's recommended version of ls-hpack" ON)
+option(USE_CUSTOM_BROTLI "Use Bun's recommended version of brotli" ON)
 option(USE_BASELINE_BUILD "Build Bun for baseline (older) CPUs" OFF)
 option(USE_SYSTEM_ICU "Use the system-provided libicu. May fix startup crashes when building WebKit yourself." OFF)
 
@@ -406,6 +407,18 @@ if(NOT ZIG_TARGET)
     if(WIN32)
         set(ZIG_TARGET "${ARCH}-windows-msvc")
     endif()
+endif()
+
+if(DEFINED ENV{ZIG_LOCAL_CACHE_DIR})
+    set(ZIG_LOCAL_CACHE_DIR "$ENV{ZIG_LOCAL_CACHE_DIR}")
+else()
+    cmake_path(SET ZIG_LOCAL_CACHE_DIR NORMALIZE "${CMAKE_CURRENT_SOURCE_DIR}/.cache/zig-cache")
+endif()
+
+if(DEFINED ENV{ZIG_GLOBAL_CACHE_DIR})
+    set(ZIG_GLOBAL_CACHE_DIR "$ENV{ZIG_GLOBAL_CACHE_DIR}")
+else()
+    cmake_path(SET ZIG_GLOBAL_CACHE_DIR NORMALIZE "${ZIG_LOCAL_CACHE_DIR}")
 endif()
 
 set(CONFIGURE_DEPENDS "CONFIGURE_DEPENDS")
@@ -787,7 +800,12 @@ if(NOT NO_CODEGEN)
         OUTPUT ${BUN_IDENTIFIER_CACHE_OUT}
         MAIN_DEPENDENCY "${BUN_SRC}/js_lexer/identifier_data.zig"
         DEPENDS "${BUN_SRC}/js_lexer/identifier_cache.zig"
-        COMMAND ${ZIG_COMPILER} run "--zig-lib-dir" "${ZIG_LIB_DIR}" "${BUN_SRC}/js_lexer/identifier_data.zig"
+        COMMAND ${ZIG_COMPILER} run
+            "--zig-lib-dir" "${ZIG_LIB_DIR}"
+            "--cache-dir" "${ZIG_LOCAL_CACHE_DIR}"
+            "--global-cache-dir" "${ZIG_GLOBAL_CACHE_DIR}"
+            "-freference-trace=10"
+            "${BUN_SRC}/js_lexer/identifier_data.zig"
         VERBATIM
         COMMENT "Building Identifier Cache"
     )
@@ -926,6 +944,8 @@ if(NOT BUN_LINK_ONLY AND NOT BUN_CPP_ONLY)
         COMMAND
         "${ZIG_COMPILER}" "build" "obj"
         "--zig-lib-dir" "${ZIG_LIB_DIR}"
+        "--cache-dir" "${ZIG_LOCAL_CACHE_DIR}"
+        "--global-cache-dir" "${ZIG_GLOBAL_CACHE_DIR}"
         "--prefix" "${BUN_ZIG_OBJ_DIR}"
         "--verbose"
         "-Dgenerated-code=${BUN_WORKDIR}/codegen"
@@ -1553,26 +1573,6 @@ else()
     target_compile_definitions(${bun} PRIVATE "LAZY_LOAD_SQLITE=1")
 endif()
 
-# -- Brotli --
-if(NOT BUN_ZIG_ONLY)
-    set(BROTLI_SRC "${CMAKE_CURRENT_SOURCE_DIR}/src/deps/brotli")
-    file(GLOB BROTLI_FILES ${CONFIGURE_DEPENDS}
-        "${BROTLI_SRC}/common/*.c"
-        "${BROTLI_SRC}/enc/*.c"
-        "${BROTLI_SRC}/dec/*.c"
-    )
-    add_library(brotli STATIC ${BROTLI_FILES})
-    target_include_directories(brotli PRIVATE "${BROTLI_SRC}/include")
-    target_compile_definitions(brotli PRIVATE "BROTLI_STATIC")
-
-    if(WIN32)
-        target_compile_options(brotli PRIVATE /MT /U_DLL)
-    endif()
-
-    target_link_libraries(${bun} PRIVATE brotli)
-    include_directories("${BUN_DEPS_DIR}/brotli/include")
-endif()
-
 if(USE_CUSTOM_LSHPACK)
     include_directories(${BUN_DEPS_DIR}/ls-hpack)
 
@@ -1593,6 +1593,43 @@ if(USE_CUSTOM_LSHPACK)
 else()
     find_package(lshpack REQUIRED)
     target_link_libraries(${bun} PRIVATE lshpack)
+endif()
+
+# -- Brotli --
+# if(NOT BUN_ZIG_ONLY)
+#     set(BROTLI_SRC "${CMAKE_CURRENT_SOURCE_DIR}/src/deps/brotli")
+#     file(GLOB BROTLI_FILES ${CONFIGURE_DEPENDS}
+#         "${BROTLI_SRC}/common/*.c"
+#         "${BROTLI_SRC}/enc/*.c"
+#         "${BROTLI_SRC}/dec/*.c"
+#     )
+#     add_library(brotli STATIC ${BROTLI_FILES})
+#     target_include_directories(brotli PRIVATE "${BROTLI_SRC}/include")
+#     target_compile_definitions(brotli PRIVATE "BROTLI_STATIC")
+
+#     if(WIN32)
+#         target_compile_options(brotli PRIVATE /MT /U_DLL)
+#     endif()
+
+#     target_link_libraries(${bun} PRIVATE brotli)
+#     include_directories("${BUN_DEPS_DIR}/brotli/include")
+# endif()
+
+if(USE_CUSTOM_BROTLI)
+    include_directories(${BUN_DEPS_DIR}/brotli/include)
+
+    if(WIN32)
+        target_link_libraries(${bun} PRIVATE "${BUN_DEPS_OUT_DIR}/brotlicommon.lib")
+        target_link_libraries(${bun} PRIVATE "${BUN_DEPS_OUT_DIR}/brotlidec.lib")
+        target_link_libraries(${bun} PRIVATE "${BUN_DEPS_OUT_DIR}/brotlienc.lib")
+    else()
+        target_link_libraries(${bun} PRIVATE "${BUN_DEPS_OUT_DIR}/libbrotlicommon.a")
+        target_link_libraries(${bun} PRIVATE "${BUN_DEPS_OUT_DIR}/libbrotlidec.a")
+        target_link_libraries(${bun} PRIVATE "${BUN_DEPS_OUT_DIR}/libbrotlienc.a")
+    endif()
+else()
+    find_package(brotli REQUIRED)
+    target_link_libraries(${bun} PRIVATE brotli)
 endif()
 
 if(NOT WIN32)
