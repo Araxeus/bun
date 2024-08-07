@@ -49,9 +49,9 @@ steps:
       - key: "bun-darwin-aarch64-build-bun"
         label: ":darwin: aarch64 - build-bun"
         depends_on:
-          - "darwin-aarch64-build-deps"
-          - "darwin-aarch64-build-zig"
-          - "darwin-aarch64-build-cpp"
+          - "bun-darwin-aarch64-build-deps"
+          - "bun-darwin-aarch64-build-zig"
+          - "bun-darwin-aarch64-build-cpp"
         agents:
           queue: "build-darwin"
           os: "darwin"
@@ -78,7 +78,7 @@ steps:
             - signal: SIGTERM
               limit: 3
         depends_on:
-          - "darwin-aarch64-build-bun"
+          - "bun-darwin-aarch64-build-bun"
         agents:
           queue: "test-darwin"
           os: "darwin"
@@ -106,7 +106,7 @@ steps:
             - signal: SIGTERM
               limit: 3
         depends_on:
-          - "darwin-aarch64-build-bun"
+          - "bun-darwin-aarch64-build-bun"
         agents:
           queue: "test-darwin"
           os: "darwin"
@@ -149,9 +149,9 @@ steps:
       - key: "bun-darwin-x64-build-bun"
         label: ":darwin: x64 - build-bun"
         depends_on:
-          - "darwin-x64-build-deps"
-          - "darwin-x64-build-zig"
-          - "darwin-x64-build-cpp"
+          - "bun-darwin-x64-build-deps"
+          - "bun-darwin-x64-build-zig"
+          - "bun-darwin-x64-build-cpp"
         agents:
           queue: "build-darwin"
           os: "darwin"
@@ -178,7 +178,7 @@ steps:
             - signal: SIGTERM
               limit: 3
         depends_on:
-          - "darwin-x64-build-bun"
+          - "bun-darwin-x64-build-bun"
         agents:
           queue: "test-darwin"
           os: "darwin"
@@ -206,7 +206,7 @@ steps:
             - signal: SIGTERM
               limit: 3
         depends_on:
-          - "darwin-x64-build-bun"
+          - "bun-darwin-x64-build-bun"
         agents:
           queue: "test-darwin"
           os: "darwin"
@@ -249,9 +249,9 @@ steps:
       - key: "bun-linux-aarch64-build-bun"
         label: ":linux: aarch64 - build-bun"
         depends_on:
-          - "linux-aarch64-build-deps"
-          - "linux-aarch64-build-zig"
-          - "linux-aarch64-build-cpp"
+          - "bun-linux-aarch64-build-deps"
+          - "bun-linux-aarch64-build-zig"
+          - "bun-linux-aarch64-build-cpp"
         agents:
           queue: "build-linux"
           os: "linux"
@@ -278,7 +278,7 @@ steps:
             - signal: SIGTERM
               limit: 3
         depends_on:
-          - "linux-aarch64-build-bun"
+          - "bun-linux-aarch64-build-bun"
         agents:
           robobun: "true"
           os: "linux"
@@ -307,7 +307,7 @@ steps:
             - signal: SIGTERM
               limit: 3
         depends_on:
-          - "linux-aarch64-build-bun"
+          - "bun-linux-aarch64-build-bun"
         agents:
           robobun: "true"
           os: "linux"
@@ -336,7 +336,7 @@ steps:
             - signal: SIGTERM
               limit: 3
         depends_on:
-          - "linux-aarch64-build-bun"
+          - "bun-linux-aarch64-build-bun"
         agents:
           robobun: "true"
           os: "linux"
@@ -380,9 +380,9 @@ steps:
       - key: "bun-linux-x64-build-bun"
         label: ":linux: x64 - build-bun"
         depends_on:
-          - "linux-x64-build-deps"
-          - "linux-x64-build-zig"
-          - "linux-x64-build-cpp"
+          - "bun-linux-x64-build-deps"
+          - "bun-linux-x64-build-zig"
+          - "bun-linux-x64-build-cpp"
         agents:
           queue: "build-linux"
           os: "linux"
@@ -409,7 +409,7 @@ steps:
             - signal: SIGTERM
               limit: 3
         depends_on:
-          - "linux-x64-build-bun"
+          - "bun-linux-x64-build-bun"
         agents:
           robobun: "true"
           os: "linux"
@@ -438,7 +438,7 @@ steps:
             - signal: SIGTERM
               limit: 3
         depends_on:
-          - "linux-x64-build-bun"
+          - "bun-linux-x64-build-bun"
         agents:
           robobun: "true"
           os: "linux"
@@ -467,7 +467,7 @@ steps:
             - signal: SIGTERM
               limit: 3
         depends_on:
-          - "linux-x64-build-bun"
+          - "bun-linux-x64-build-bun"
         agents:
           robobun: "true"
           os: "linux"
@@ -511,9 +511,9 @@ steps:
       - key: "bun-linux-x64-baseline-build-bun"
         label: ":linux: x64-baseline - build-bun"
         depends_on:
-          - "linux-x64-baseline-build-deps"
-          - "linux-x64-baseline-build-zig"
-          - "linux-x64-baseline-build-cpp"
+          - "bun-linux-x64-baseline-build-deps"
+          - "bun-linux-x64-baseline-build-zig"
+          - "bun-linux-x64-baseline-build-cpp"
         agents:
           queue: "build-linux"
           os: "linux"
@@ -540,7 +540,7 @@ steps:
             - signal: SIGTERM
               limit: 3
         depends_on:
-          - "linux-x64-baseline-build-bun"
+          - "bun-linux-x64-baseline-build-bun"
         agents:
           robobun: "true"
           os: "linux"
@@ -569,7 +569,7 @@ steps:
             - signal: SIGTERM
               limit: 3
         depends_on:
-          - "linux-x64-baseline-build-bun"
+          - "bun-linux-x64-baseline-build-bun"
         agents:
           robobun: "true"
           os: "linux"
@@ -598,7 +598,7 @@ steps:
             - signal: SIGTERM
               limit: 3
         depends_on:
-          - "linux-x64-baseline-build-bun"
+          - "bun-linux-x64-baseline-build-bun"
         agents:
           robobun: "true"
           os: "linux"
@@ -644,9 +644,9 @@ steps:
       - key: "bun-windows-x64-build-bun"
         label: ":windows: x64 - build-bun"
         depends_on:
-          - "windows-x64-build-deps"
-          - "windows-x64-build-zig"
-          - "windows-x64-build-cpp"
+          - "bun-windows-x64-build-deps"
+          - "bun-windows-x64-build-zig"
+          - "bun-windows-x64-build-cpp"
         agents:
           queue: "build-windows"
           os: "windows"
@@ -671,7 +671,7 @@ steps:
             - signal: SIGTERM
               limit: 3
         depends_on:
-          - "windows-x64-build-bun"
+          - "bun-windows-x64-build-bun"
         agents:
           robobun: "true"
           os: "windows"
@@ -713,9 +713,9 @@ steps:
       - key: "bun-windows-x64-baseline-build-bun"
         label: ":windows: x64-baseline - build-bun"
         depends_on:
-          - "windows-x64-baseline-build-deps"
-          - "windows-x64-baseline-build-zig"
-          - "windows-x64-baseline-build-cpp"
+          - "bun-windows-x64-baseline-build-deps"
+          - "bun-windows-x64-baseline-build-zig"
+          - "bun-windows-x64-baseline-build-cpp"
         agents:
           queue: "build-windows"
           os: "windows"
@@ -740,7 +740,7 @@ steps:
             - signal: SIGTERM
               limit: 3
         depends_on:
-          - "windows-x64-baseline-build-bun"
+          - "bun-windows-x64-baseline-build-bun"
         agents:
           robobun: "true"
           os: "windows"
