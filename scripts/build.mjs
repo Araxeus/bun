@@ -247,7 +247,6 @@ export function getBuildOptions() {
     name: "clean",
     description: "If directories should be cleaned before building",
     type: "boolean",
-    defaultValue: isCI,
   });
 
   const osxVersion = getOption({
