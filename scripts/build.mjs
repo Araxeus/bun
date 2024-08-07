@@ -913,6 +913,8 @@ function getBunArtifacts(options) {
   let artifacts;
   if (debug) {
     artifacts = ["bun-debug"];
+  } else if (os === "windows") {
+    artifacts = ["bun"];
   } else {
     artifacts = ["bun", "bun-profile"];
   }
