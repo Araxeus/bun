@@ -426,6 +426,9 @@ export async function gitClone(options) {
         return false;
       }
     }
+    if (isCI) {
+      await gitClean(cwd);
+    }
     {
       const { exitCode } = await spawn("git", ["-c", "advice.detachedHead=false", "checkout", "FETCH_HEAD"], {
         cwd,
