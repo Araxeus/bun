@@ -861,7 +861,7 @@ async function buildBun(options) {
  */
 async function packageBun(options) {
   const { cwd, buildPath, debug, os, target } = options;
-  const names = debug ? ["bun-debug"] : ["bun", "bun-profile"];
+  const names = debug ? ["bun-debug"] : os === "windows" ? ["bun"] : ["bun", "bun-profile"];
 
   for (const name of names) {
     const exe = os === "windows" ? `${name}.exe` : name;
