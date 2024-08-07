@@ -908,7 +908,7 @@ async function packageBun(options) {
  * @returns {string[]}
  */
 function getBunArtifacts(options) {
-  const { debug, target } = options;
+  const { os, debug, target } = options;
 
   let artifacts;
   if (debug) {
