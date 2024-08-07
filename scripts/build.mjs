@@ -998,8 +998,9 @@ async function cmakeGenerateBunBuild(options, target) {
     canary && `-DCANARY=${canary}`,
     baseline && "-DUSE_BASELINE_BUILD=ON",
     lto && "-DUSE_LTO=ON",
-    debug && assertions && "-DUSE_DEBUG_JSC=ON",
     valgrind && "-DUSE_VALGRIND=ON",
+    debug && assertions && "-DUSE_DEBUG_JSC=ON",
+    assertions && "-DENABLE_LOGS=true",
   ];
 
   if (target === "cpp") {
