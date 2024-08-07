@@ -49,6 +49,7 @@ import {
   buildkiteDownloadArtifact,
   getGitUrl,
   sanitizePath,
+  getGitBranch,
 } from "./util.mjs";
 
 async function main() {
