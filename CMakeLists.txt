@@ -1554,24 +1554,22 @@ else()
 endif()
 
 # -- Brotli --
-if(NOT BUN_ZIG_ONLY)
-    set(BROTLI_SRC "${CMAKE_CURRENT_SOURCE_DIR}/src/deps/brotli")
-    file(GLOB BROTLI_FILES ${CONFIGURE_DEPENDS}
-        "${BROTLI_SRC}/common/*.c"
-        "${BROTLI_SRC}/enc/*.c"
-        "${BROTLI_SRC}/dec/*.c"
-    )
-    add_library(brotli STATIC ${BROTLI_FILES})
-    target_include_directories(brotli PRIVATE "${BROTLI_SRC}/include")
-    target_compile_definitions(brotli PRIVATE "BROTLI_STATIC")
+set(BROTLI_SRC "${CMAKE_CURRENT_SOURCE_DIR}/src/deps/brotli")
+file(GLOB BROTLI_FILES ${CONFIGURE_DEPENDS}
+    "${BROTLI_SRC}/common/*.c"
+    "${BROTLI_SRC}/enc/*.c"
+    "${BROTLI_SRC}/dec/*.c"
+)
+add_library(brotli STATIC ${BROTLI_FILES})
+target_include_directories(brotli PRIVATE "${BROTLI_SRC}/include")
+target_compile_definitions(brotli PRIVATE "BROTLI_STATIC")
 
-    if(WIN32)
-        target_compile_options(brotli PRIVATE /MT /U_DLL)
-    endif()
-
-    target_link_libraries(${bun} PRIVATE brotli)
-    include_directories("${BUN_DEPS_DIR}/brotli/include")
+if(WIN32)
+    target_compile_options(brotli PRIVATE /MT /U_DLL)
 endif()
+
+target_link_libraries(${bun} PRIVATE brotli)
+include_directories("${BUN_DEPS_DIR}/brotli/include")
 
 if(USE_CUSTOM_LSHPACK)
     include_directories(${BUN_DEPS_DIR}/ls-hpack)
