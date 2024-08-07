@@ -1616,7 +1616,7 @@ endif()
 # endif()
 
 if(USE_CUSTOM_BROTLI)
-    include_directories(${BUN_DEPS_DIR}/brotli/include)
+    include_directories(${BUN_DEPS_DIR}/brotli/c/include)
 
     if(WIN32)
         target_link_libraries(${bun} PRIVATE "${BUN_DEPS_OUT_DIR}/brotlicommon.lib")

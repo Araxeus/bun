@@ -748,10 +748,18 @@ function getArtifacts(options) {
   if (os === "windows") {
     addDependency({
       name: "libuv",
-      artifacts: getLibuvArtifacts(options),
-      build: buildLibuv,
       repository: "https://github.com/libuv/libuv.git",
       commit: "da527d8d2a908b824def74382761566371439003",
+      artifacts: getLibuvArtifacts(options),
+      build: buildLibuv,
+    });
+  }
+
+  if (os !== "darwin") {
+    addDependency({
+      name: "sqlite",
+      artifacts: getSqliteArtifacts(options),
+      build: buildSqlite,
     });
   }
 
@@ -1399,6 +1407,19 @@ async function buildMimalloc(options) {
   }
 }
 
+function getSqliteArtifacts(options) {
+  const { os } = options;
+  if (os === "windows") {
+    return ["sqlite3.lib"];
+  }
+  return ["libsqlite3.a"];
+}
+
+async function buildSqlite(options) {
+  await cmakeGenerateBuild(options);
+  await cmakeBuild(options, ...getSqliteArtifacts(options));
+}
+
 /**
  * @param {BuildOptions} options
  * @returns {string[]}
@@ -1871,7 +1892,7 @@ async function cmakeGenerateBuild(options, ...extraArgs) {
  */
 async function cmakeBuild(options, ...targets) {
   const { cwd, buildPath, debug, clean, jobs } = options;
-  const args = ["--build", buildPath || ".", "--parallel", `${jobs}`];
+  const args = ["--build", buildPath, "--parallel", `${jobs}`];
 
   if (debug) {
     args.push("--config", "Debug");
