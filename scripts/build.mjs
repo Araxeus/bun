@@ -344,14 +344,14 @@ export function getBuildOptions() {
     parse: resolve,
     defaultValue: () => {
       let basePath = cwd;
-      if (isBuildKite) {
-        const buildPath = process.env["BUILDKITE_BUILD_PATH"];
-        const repository = getGitUrl();
-        const branch = getGitBranch();
-        if (buildPath && repository && branch) {
-          basePath = join(buildPath, "git", sanitizePath(repository), sanitizePath(branch));
-        }
-      }
+      // if (isBuildKite) {
+      //   const buildPath = process.env["BUILDKITE_BUILD_PATH"];
+      //   const repository = getGitUrl();
+      //   const branch = getGitBranch();
+      //   if (buildPath && repository && branch) {
+      //     basePath = join(buildPath, "git", sanitizePath(repository), sanitizePath(branch));
+      //   }
+      // }
       return join(basePath, "build", debug ? "debug" : "release", target);
     },
   });
