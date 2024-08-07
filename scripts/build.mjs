@@ -821,14 +821,14 @@ async function linkBun(options) {
   }
 
   if (isBuildKite) {
-    const { os, arch } = options;
+    const { target } = options;
     const basePath = dirname(buildPath);
 
     await Promise.all(
       ["zig", "cpp", "deps"].map(name =>
         buildkiteDownloadArtifact({
           // Defined in .buildkite/ci.yml
-          step: `${os}-${arch}-build-${name}`,
+          step: `${target}-build-${name}`,
           cwd: join(basePath, `bun-${name}`),
         }),
       ),
