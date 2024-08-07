@@ -987,7 +987,7 @@ function getBunArtifacts(options) {
  * @param {"cpp" | "zig" | "link" | undefined} target
  */
 async function cmakeGenerateBunBuild(options, target) {
-  const { buildPath, buildId, canary, baseline, lto, assertions, valgrind } = options;
+  const { buildPath, buildId, canary, baseline, lto, debug, assertions, valgrind } = options;
   const baseBuildPath = dirname(buildPath);
 
   const cpuTarget = getCpuTarget(options);
@@ -998,7 +998,7 @@ async function cmakeGenerateBunBuild(options, target) {
     canary && `-DCANARY=${canary}`,
     baseline && "-DUSE_BASELINE_BUILD=ON",
     lto && "-DUSE_LTO=ON",
-    assertions && "-DUSE_DEBUG_JSC=ON",
+    debug && assertions && "-DUSE_DEBUG_JSC=ON",
     valgrind && "-DUSE_VALGRIND=ON",
   ];
 
