@@ -257,7 +257,16 @@ export function getGitBranch(cwd) {
   }
 
   if (isBuildKite) {
-    return process.env["BUILDKITE_BRANCH"];
+    const name = process.env["BUILDKITE_BRANCH"];
+    const fork = process.env["BUILDKITE_PULL_REQUEST_REPO"];
+
+    // If the following setting is enabled, branch names are prefixed with the fork name:
+    // "Prefix third-party fork branch names"
+    if (fork && name.startsWith(`${fork}:`)) {
+      return name.slice(fork.length + 1);
+    }
+
+    return name;
   }
 
   if (isGithubAction) {
@@ -1529,6 +1538,15 @@ export function formatDuration(epoch) {
     return `${minutes.toFixed(2)}m`;
   }
   return `${hours.toFixed(2)}h`;
+}
+
+/**
+ * Sanitizes a string to be used as a path.
+ * @param {string} string
+ * @returns {string}
+ */
+export function sanitizePath(string) {
+  return string.replace(/[^a-z0-9]/gi, "-").toLowerCase();
 }
 
 /**

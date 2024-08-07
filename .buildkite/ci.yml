@@ -16,10 +16,10 @@
 # - Rasberry Pi?
 steps:
   # macOS aarch64
-  - key: "darwin-aarch64"
+  - key: "bun-darwin-aarch64"
     group: ":darwin: aarch64"
     steps:
-      - key: "darwin-aarch64-build-deps"
+      - key: "bun-darwin-aarch64-build-deps"
         label: ":darwin: aarch64 - build-deps"
         agents:
           queue: "build-darwin"
@@ -28,7 +28,7 @@ steps:
         command:
           - "./scripts/build.mjs bun-deps"
 
-      - key: "darwin-aarch64-build-zig"
+      - key: "bun-darwin-aarch64-build-zig"
         label: ":darwin: aarch64 - build-zig"
         agents:
           queue: "build-darwin"
@@ -37,7 +37,7 @@ steps:
         command:
           - "./scripts/build.mjs bun-zig --cross-compile"
 
-      - key: "darwin-aarch64-build-cpp"
+      - key: "bun-darwin-aarch64-build-cpp"
         label: ":darwin: aarch64 - build-cpp"
         agents:
           queue: "build-darwin"
@@ -46,7 +46,7 @@ steps:
         command:
           - "./scripts/build.mjs bun-cpp"
 
-      - key: "darwin-aarch64-build-bun"
+      - key: "bun-darwin-aarch64-build-bun"
         label: ":darwin: aarch64 - build-bun"
         depends_on:
           - "darwin-aarch64-build-deps"
@@ -59,7 +59,7 @@ steps:
         command:
           - "./scripts/build.mjs bun-link"
 
-      - key: "darwin-aarch64-test-macos-14"
+      - key: "bun-darwin-aarch64-test-macos-14"
         label: ":darwin: 14 aarch64 - test-bun"
         if: "build.branch != 'main'"
         parallelism: 3
@@ -85,9 +85,9 @@ steps:
           arch: "aarch64"
           release: "14"
         command:
-          - "./scripts/runner.node.mjs --step darwin-aarch64-build-bun"
+          - "./scripts/runner.node.mjs --step bun-darwin-aarch64-build-bun"
 
-      - key: "darwin-aarch64-test-macos-13"
+      - key: "bun-darwin-aarch64-test-macos-13"
         label: ":darwin: 13 aarch64 - test-bun"
         if: "build.branch != 'main'"
         parallelism: 3
@@ -113,13 +113,13 @@ steps:
           arch: "aarch64"
           release: "13"
         command:
-          - "./scripts/runner.node.mjs --step darwin-aarch64-build-bun"
+          - "./scripts/runner.node.mjs --step bun-darwin-aarch64-build-bun"
 
   # macOS x64
-  - key: "darwin-x64"
+  - key: "bun-darwin-x64"
     group: ":darwin: x64"
     steps:
-      - key: "darwin-x64-build-deps"
+      - key: "bun-darwin-x64-build-deps"
         label: ":darwin: x64 - build-deps"
         agents:
           queue: "build-darwin"
@@ -128,7 +128,7 @@ steps:
         command:
           - "./scripts/build.mjs bun-deps"
 
-      - key: "darwin-x64-build-zig"
+      - key: "bun-darwin-x64-build-zig"
         label: ":darwin: x64 - build-zig"
         agents:
           queue: "build-darwin"
@@ -137,7 +137,7 @@ steps:
         command:
           - "./scripts/build.mjs bun-zig --cross-compile"
 
-      - key: "darwin-x64-build-cpp"
+      - key: "bun-darwin-x64-build-cpp"
         label: ":darwin: x64 - build-cpp"
         agents:
           queue: "build-darwin"
@@ -146,7 +146,7 @@ steps:
         command:
           - "./scripts/build.mjs bun-cpp"
 
-      - key: "darwin-x64-build-bun"
+      - key: "bun-darwin-x64-build-bun"
         label: ":darwin: x64 - build-bun"
         depends_on:
           - "darwin-x64-build-deps"
@@ -159,7 +159,7 @@ steps:
         command:
           - "./scripts/build.mjs bun-link"
 
-      - key: "darwin-x64-test-macos-14"
+      - key: "bun-darwin-x64-test-macos-14"
         label: ":darwin: 14 x64 - test-bun"
         if: "build.branch != 'main'"
         parallelism: 2
@@ -185,9 +185,9 @@ steps:
           arch: "x64"
           release: "14"
         command:
-          - "./scripts/runner.node.mjs --step darwin-x64-build-bun"
+          - "./scripts/runner.node.mjs --step bun-darwin-x64-build-bun"
 
-      - key: "darwin-x64-test-macos-13"
+      - key: "bun-darwin-x64-test-macos-13"
         label: ":darwin: 13 x64 - test-bun"
         if: "build.branch != 'main'"
         parallelism: 2
@@ -213,13 +213,13 @@ steps:
           arch: "x64"
           release: "13"
         command:
-          - "./scripts/runner.node.mjs --step darwin-x64-build-bun"
+          - "./scripts/runner.node.mjs --step bun-darwin-x64-build-bun"
 
   # Linux aarch64
-  - key: "linux-aarch64"
+  - key: "bun-linux-aarch64"
     group: ":linux: aarch64"
     steps:
-      - key: "linux-aarch64-build-deps"
+      - key: "bun-linux-aarch64-build-deps"
         label: ":linux: aarch64 - build-deps"
         agents:
           queue: "build-linux"
@@ -228,7 +228,7 @@ steps:
         command:
           - "./scripts/build.mjs bun-deps"
 
-      - key: "linux-aarch64-build-zig"
+      - key: "bun-linux-aarch64-build-zig"
         label: ":linux: aarch64 - build-zig"
         agents:
           queue: "build-darwin"
@@ -237,7 +237,7 @@ steps:
         command:
           - "./scripts/build.mjs bun-zig --cross-compile"
 
-      - key: "linux-aarch64-build-cpp"
+      - key: "bun-linux-aarch64-build-cpp"
         label: ":linux: aarch64 - build-cpp"
         agents:
           queue: "build-linux"
@@ -246,7 +246,7 @@ steps:
         command:
           - "./scripts/build.mjs bun-cpp"
 
-      - key: "linux-aarch64-build-bun"
+      - key: "bun-linux-aarch64-build-bun"
         label: ":linux: aarch64 - build-bun"
         depends_on:
           - "linux-aarch64-build-deps"
@@ -259,7 +259,7 @@ steps:
         command:
           - "./scripts/build.mjs bun-link"
 
-      - key: "linux-aarch64-test-debian-12"
+      - key: "bun-linux-aarch64-test-debian-12"
         label: ":debian: 12 aarch64 - test-bun"
         if: "build.branch != 'main'"
         parallelism: 5
@@ -286,9 +286,9 @@ steps:
           distro: "debian"
           release: "12"
         command:
-          - "./scripts/runner.node.mjs --step linux-aarch64-build-bun"
+          - "./scripts/runner.node.mjs --step bun-linux-aarch64-build-bun"
 
-      - key: "linux-aarch64-test-ubuntu-2204"
+      - key: "bun-linux-aarch64-test-ubuntu-2204"
         label: ":ubuntu: 22.04 aarch64 - test-bun"
         if: "build.branch != 'main'"
         parallelism: 5
@@ -315,9 +315,9 @@ steps:
           distro: "ubuntu"
           release: "22.04"
         command:
-          - "./scripts/runner.node.mjs --step linux-aarch64-build-bun"
+          - "./scripts/runner.node.mjs --step bun-linux-aarch64-build-bun"
 
-      - key: "linux-aarch64-test-ubuntu-2004"
+      - key: "bun-linux-aarch64-test-ubuntu-2004"
         label: ":ubuntu: 20.04 aarch64 - test-bun"
         if: "build.branch != 'main'"
         parallelism: 5
@@ -344,13 +344,13 @@ steps:
           distro: "ubuntu"
           release: "20.04"
         command:
-          - "./scripts/runner.node.mjs --step linux-aarch64-build-bun"
+          - "./scripts/runner.node.mjs --step bun-linux-aarch64-build-bun"
 
   # Linux x64
-  - key: "linux-x64"
+  - key: "bun-linux-x64"
     group: ":linux: x64"
     steps:
-      - key: "linux-x64-build-deps"
+      - key: "bun-linux-x64-build-deps"
         label: ":linux: x64 - build-deps"
         agents:
           queue: "build-linux"
@@ -359,7 +359,7 @@ steps:
         command:
           - "./scripts/build.mjs bun-deps"
 
-      - key: "linux-x64-build-zig"
+      - key: "bun-linux-x64-build-zig"
         label: ":linux: x64 - build-zig"
         agents:
           queue: "build-darwin"
@@ -368,7 +368,7 @@ steps:
         command:
           - "./scripts/build.mjs bun-zig --cross-compile"
 
-      - key: "linux-x64-build-cpp"
+      - key: "bun-linux-x64-build-cpp"
         label: ":linux: x64 - build-cpp"
         agents:
           queue: "build-linux"
@@ -377,7 +377,7 @@ steps:
         command:
           - "./scripts/build.mjs bun-cpp"
 
-      - key: "linux-x64-build-bun"
+      - key: "bun-linux-x64-build-bun"
         label: ":linux: x64 - build-bun"
         depends_on:
           - "linux-x64-build-deps"
@@ -390,7 +390,7 @@ steps:
         command:
           - "./scripts/build.mjs bun-link"
 
-      - key: "linux-x64-test-debian-12"
+      - key: "bun-linux-x64-test-debian-12"
         label: ":debian: 12 x64 - test-bun"
         if: "build.branch != 'main'"
         parallelism: 5
@@ -417,9 +417,9 @@ steps:
           distro: "debian"
           release: "12"
         command:
-          - "./scripts/runner.node.mjs --step linux-x64-build-bun"
+          - "./scripts/runner.node.mjs --step bun-linux-x64-build-bun"
 
-      - key: "linux-x64-test-ubuntu-2204"
+      - key: "bun-linux-x64-test-ubuntu-2204"
         label: ":ubuntu: 22.04 x64 - test-bun"
         if: "build.branch != 'main'"
         parallelism: 5
@@ -446,9 +446,9 @@ steps:
           distro: "ubuntu"
           release: "22.04"
         command:
-          - "./scripts/runner.node.mjs --step linux-x64-build-bun"
+          - "./scripts/runner.node.mjs --step bun-linux-x64-build-bun"
 
-      - key: "linux-x64-test-ubuntu-2004"
+      - key: "bun-linux-x64-test-ubuntu-2004"
         label: ":ubuntu: 20.04 x64 - test-bun"
         if: "build.branch != 'main'"
         parallelism: 5
@@ -475,13 +475,13 @@ steps:
           distro: "ubuntu"
           release: "20.04"
         command:
-          - "./scripts/runner.node.mjs --step linux-x64-build-bun"
+          - "./scripts/runner.node.mjs --step bun-linux-x64-build-bun"
 
   # Linux x64-baseline
-  - key: "linux-x64-baseline"
+  - key: "bun-linux-x64-baseline"
     group: ":linux: x64-baseline"
     steps:
-      - key: "linux-x64-baseline-build-deps"
+      - key: "bun-linux-x64-baseline-build-deps"
         label: ":linux: x64-baseline - build-deps"
         agents:
           queue: "build-linux"
@@ -490,7 +490,7 @@ steps:
         command:
           - "./scripts/build.mjs bun-deps --baseline"
 
-      - key: "linux-x64-baseline-build-zig"
+      - key: "bun-linux-x64-baseline-build-zig"
         label: ":linux: x64-baseline - build-zig"
         agents:
           queue: "build-darwin"
@@ -499,7 +499,7 @@ steps:
         command:
           - "./scripts/build.mjs bun-zig --cross-compile"
 
-      - key: "linux-x64-baseline-build-cpp"
+      - key: "bun-linux-x64-baseline-build-cpp"
         label: ":linux: x64-baseline - build-cpp"
         agents:
           queue: "build-linux"
@@ -508,7 +508,7 @@ steps:
         command:
           - "./scripts/build.mjs bun-cpp"
 
-      - key: "linux-x64-baseline-build-bun"
+      - key: "bun-linux-x64-baseline-build-bun"
         label: ":linux: x64-baseline - build-bun"
         depends_on:
           - "linux-x64-baseline-build-deps"
@@ -521,7 +521,7 @@ steps:
         command:
           - "./scripts/build.mjs bun-link --baseline"
 
-      - key: "linux-x64-baseline-test-debian-12"
+      - key: "bun-linux-x64-baseline-test-debian-12"
         label: ":debian: 12 x64-baseline - test-bun"
         if: "build.branch != 'main'"
         parallelism: 5
@@ -548,9 +548,9 @@ steps:
           distro: "debian"
           release: "12"
         command:
-          - "./scripts/runner.node.mjs --step linux-x64-baseline-build-bun"
+          - "./scripts/runner.node.mjs --step bun-linux-x64-baseline-build-bun"
 
-      - key: "linux-x64-baseline-test-ubuntu-2204"
+      - key: "bun-linux-x64-baseline-test-ubuntu-2204"
         label: ":ubuntu: 22.04 x64-baseline - test-bun"
         if: "build.branch != 'main'"
         parallelism: 5
@@ -577,9 +577,9 @@ steps:
           distro: "ubuntu"
           release: "22.04"
         command:
-          - "./scripts/runner.node.mjs --step linux-x64-baseline-build-bun"
+          - "./scripts/runner.node.mjs --step bun-linux-x64-baseline-build-bun"
 
-      - key: "linux-x64-baseline-test-ubuntu-2004"
+      - key: "bun-linux-x64-baseline-test-ubuntu-2004"
         label: ":ubuntu: 20.04 x64-baseline - test-bun"
         if: "build.branch != 'main'"
         parallelism: 5
@@ -606,26 +606,24 @@ steps:
           distro: "ubuntu"
           release: "20.04"
         command:
-          - "./scripts/runner.node.mjs --step linux-x64-baseline-build-bun"
+          - "./scripts/runner.node.mjs --step bun-linux-x64-baseline-build-bun"
 
   # Windows x64
-  - key: "windows-x64"
+  - key: "bun-windows-x64"
     group: ":windows: x64"
     steps:
-      - key: "windows-x64-build-deps"
+      - key: "bun-windows-x64-build-deps"
         label: ":windows: x64 - build-deps"
         agents:
           queue: "build-windows"
           os: "windows"
           arch: "x64"
-        artifact_paths:
-          - "build\\bun-deps\\*.lib"
         env:
           CCACHE_DISABLE: "1"
         command:
           - ".\\scripts\\build.ps1 bun-deps"
 
-      - key: "windows-x64-build-zig"
+      - key: "bun-windows-x64-build-zig"
         label: ":windows: x64 - build-zig"
         agents:
           queue: "build-darwin"
@@ -634,7 +632,7 @@ steps:
         command:
           - "./scripts/build.mjs bun-zig --cross-compile"
 
-      - key: "windows-x64-build-cpp"
+      - key: "bun-windows-x64-build-cpp"
         label: ":windows: x64 - build-cpp"
         agents:
           queue: "build-windows"
@@ -643,7 +641,7 @@ steps:
         command:
           - ".\\scripts\\build.ps1 bun-cpp"
 
-      - key: "windows-x64-build-bun"
+      - key: "bun-windows-x64-build-bun"
         label: ":windows: x64 - build-bun"
         depends_on:
           - "windows-x64-build-deps"
@@ -656,7 +654,7 @@ steps:
         command:
           - ".\\scripts\\build.ps1 bun-link"
 
-      - key: "windows-x64-test-bun"
+      - key: "bun-windows-x64-test-bun"
         label: ":windows: x64 - test-bun"
         if: "build.branch != 'main'"
         parallelism: 10
@@ -679,13 +677,13 @@ steps:
           os: "windows"
           arch: "x64"
         command:
-          - "node .\\scripts\\runner.node.mjs --step windows-x64-build-bun"
+          - "node .\\scripts\\runner.node.mjs --step bun-windows-x64-build-bun"
 
   # Windows x64-baseline
-  - key: "windows-x64-baseline"
+  - key: "bun-windows-x64-baseline"
     group: ":windows: x64-baseline"
     steps:
-      - key: "windows-x64-baseline-build-deps"
+      - key: "bun-windows-x64-baseline-build-deps"
         label: ":windows: x64-baseline - build-deps"
         agents:
           queue: "build-windows"
@@ -694,7 +692,7 @@ steps:
         command:
           - ".\\scripts\\build.ps1 bun-deps --baseline"
 
-      - key: "windows-x64-baseline-build-zig"
+      - key: "bun-windows-x64-baseline-build-zig"
         label: ":windows: x64-baseline - build-zig"
         agents:
           queue: "build-darwin"
@@ -703,7 +701,7 @@ steps:
         command:
           - "./scripts/build.mjs bun-zig --cross-compile"
 
-      - key: "windows-x64-baseline-build-cpp"
+      - key: "bun-windows-x64-baseline-build-cpp"
         label: ":windows: x64-baseline - build-cpp"
         agents:
           queue: "build-windows"
@@ -712,7 +710,7 @@ steps:
         command:
           - ".\\scripts\\build.ps1 bun-cpp --baseline"
 
-      - key: "windows-x64-baseline-build-bun"
+      - key: "bun-windows-x64-baseline-build-bun"
         label: ":windows: x64-baseline - build-bun"
         depends_on:
           - "windows-x64-baseline-build-deps"
@@ -725,7 +723,7 @@ steps:
         command:
           - ".\\scripts\\build.ps1 bun-link --baseline"
 
-      - key: "windows-x64-baseline-test-bun"
+      - key: "bun-windows-x64-baseline-test-bun"
         label: ":windows: x64-baseline - test-bun"
         if: "build.branch != 'main'"
         parallelism: 10
@@ -748,4 +746,4 @@ steps:
           os: "windows"
           arch: "x64"
         command:
-          - "node .\\scripts\\runner.node.mjs --step windows-x64-baseline-build-bun"
+          - "node .\\scripts\\runner.node.mjs --step bun-windows-x64-baseline-build-bun"

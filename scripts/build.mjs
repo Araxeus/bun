@@ -47,6 +47,8 @@ import {
   symlinkFile,
   gitClone,
   buildkiteDownloadArtifact,
+  getGitUrl,
+  sanitizePath,
 } from "./util.mjs";
 
 async function main() {
@@ -340,7 +342,17 @@ export function getBuildOptions() {
     name: "build-path",
     description: "The build directory",
     parse: resolve,
-    defaultValue: join(cwd, "build", debug ? "debug" : "release", target),
+    defaultValue: () => {
+      if (isBuildKite) {
+        const buildPath = process.env["BUILDKITE_BUILD_PATH"];
+        const repository = getGitUrl();
+        const branch = getGitBranch();
+        if (buildPath && repository && branch) {
+          return join(buildPath, "git", sanitizePath(repository), sanitizePath(branch));
+        }
+      }
+      return join(cwd, "build", debug ? "debug" : "release", target);
+    },
   });
 
   const cachePath = getOption({
