@@ -426,9 +426,6 @@ export async function gitClone(options) {
         return false;
       }
     }
-    if (isCI) {
-      await gitClean(cwd);
-    }
     {
       const { exitCode } = await spawn("git", ["-c", "advice.detachedHead=false", "checkout", "FETCH_HEAD"], {
         cwd,
@@ -454,6 +451,10 @@ export async function gitClone(options) {
 
   if (!done) {
     throw new Error(`Failed to clone repository: ${repository}`);
+  }
+
+  if (isCI) {
+    await gitReset(cwd);
   }
 }
 
