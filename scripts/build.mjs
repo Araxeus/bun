@@ -343,15 +343,16 @@ export function getBuildOptions() {
     description: "The build directory",
     parse: resolve,
     defaultValue: () => {
+      let basePath = cwd;
       if (isBuildKite) {
         const buildPath = process.env["BUILDKITE_BUILD_PATH"];
         const repository = getGitUrl();
         const branch = getGitBranch();
         if (buildPath && repository && branch) {
-          return join(buildPath, "git", sanitizePath(repository), sanitizePath(branch));
+          basePath = join(buildPath, "git", sanitizePath(repository), sanitizePath(branch));
         }
       }
-      return join(cwd, "build", debug ? "debug" : "release", target);
+      return join(basePath, "build", debug ? "debug" : "release", target);
     },
   });
 
